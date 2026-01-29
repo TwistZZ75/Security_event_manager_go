@@ -1,0 +1,3 @@
+/.vscode
+/siem-server/.env
+/siem-server/proto/logs.proto
