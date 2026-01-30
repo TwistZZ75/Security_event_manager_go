@@ -19,17 +19,21 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	LogService_SendRawLog_FullMethodName = "/logs.LogService/SendRawLog"
+	LogService_SendRawLog_FullMethodName       = "/logs.LogService/SendRawLog"
+	LogService_SendRawLogStream_FullMethodName = "/logs.LogService/SendRawLogStream"
 )
 
 // LogServiceClient is the client API for LogService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
-// серсис
+// сервис
 type LogServiceClient interface {
 	// определение метода сервиса с принимаемыми данными и ответом
+	// отправка отдного лога
 	SendRawLog(ctx context.Context, in *RequestRawLog, opts ...grpc.CallOption) (*ResponseRawLog, error)
+	// отправка потока логов
+	SendRawLogStream(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[RequestRawLog, ResponseRawLog], error)
 }
 
 type logServiceClient struct {
@@ -50,14 +54,30 @@ func (c *logServiceClient) SendRawLog(ctx context.Context, in *RequestRawLog, op
 	return out, nil
 }
 
+func (c *logServiceClient) SendRawLogStream(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[RequestRawLog, ResponseRawLog], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &LogService_ServiceDesc.Streams[0], LogService_SendRawLogStream_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[RequestRawLog, ResponseRawLog]{ClientStream: stream}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type LogService_SendRawLogStreamClient = grpc.ClientStreamingClient[RequestRawLog, ResponseRawLog]
+
 // LogServiceServer is the server API for LogService service.
 // All implementations must embed UnimplementedLogServiceServer
 // for forward compatibility.
 //
-// серсис
+// сервис
 type LogServiceServer interface {
 	// определение метода сервиса с принимаемыми данными и ответом
+	// отправка отдного лога
 	SendRawLog(context.Context, *RequestRawLog) (*ResponseRawLog, error)
+	// отправка потока логов
+	SendRawLogStream(grpc.ClientStreamingServer[RequestRawLog, ResponseRawLog]) error
 	mustEmbedUnimplementedLogServiceServer()
 }
 
@@ -70,6 +90,9 @@ type UnimplementedLogServiceServer struct{}
 
 func (UnimplementedLogServiceServer) SendRawLog(context.Context, *RequestRawLog) (*ResponseRawLog, error) {
 	return nil, status.Error(codes.Unimplemented, "method SendRawLog not implemented")
+}
+func (UnimplementedLogServiceServer) SendRawLogStream(grpc.ClientStreamingServer[RequestRawLog, ResponseRawLog]) error {
+	return status.Error(codes.Unimplemented, "method SendRawLogStream not implemented")
 }
 func (UnimplementedLogServiceServer) mustEmbedUnimplementedLogServiceServer() {}
 func (UnimplementedLogServiceServer) testEmbeddedByValue()                    {}
@@ -110,6 +133,13 @@ func _LogService_SendRawLog_Handler(srv interface{}, ctx context.Context, dec fu
 	return interceptor(ctx, in, info, handler)
 }
 
+func _LogService_SendRawLogStream_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(LogServiceServer).SendRawLogStream(&grpc.GenericServerStream[RequestRawLog, ResponseRawLog]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type LogService_SendRawLogStreamServer = grpc.ClientStreamingServer[RequestRawLog, ResponseRawLog]
+
 // LogService_ServiceDesc is the grpc.ServiceDesc for LogService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -122,6 +152,12 @@ var LogService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _LogService_SendRawLog_Handler,
 		},
 	},
-	Streams:  []grpc.StreamDesc{},
+	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "SendRawLogStream",
+			Handler:       _LogService_SendRawLogStream_Handler,
+			ClientStreams: true,
+		},
+	},
 	Metadata: "logs.proto",
 }

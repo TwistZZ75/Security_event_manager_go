@@ -7,10 +7,11 @@ import (
 //Создаём структуру входящего необработанного лога
 
 type RawLog struct {
-	Username        string
-	PC_name         string
-	Log_source      string
-	Event_timestamp time.Time
-	Format          string
-	Raw_data        string
+	Username        string    // имя пользователя
+	PC_name         string    // имя компьютера
+	OS              string    // ОС
+	Log_source      string    // источник лога (suricata, syslog, winEvents...)
+	Event_timestamp time.Time // время создания лога
+	Format          string    // формат лога (xml, json и т.д.)
+	Raw_data        string    // сам лог целиком
 }

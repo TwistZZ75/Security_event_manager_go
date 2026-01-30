@@ -3,13 +3,20 @@ package main
 import (
 	"context"
 	"log"
+	"net"
 	"os"
-	logsstructure "siem-server/internal/logsstructure"
+	"os/signal"
+	"siem-server/internal/delivery"
+	"siem-server/internal/parsers"
+	processor "siem-server/internal/processor"
 	postgres "siem-server/internal/storage/postgres"
-	"time"
+	"siem-server/proto/server/pkg/pb"
+	"syscall"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/joho/godotenv"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/reflection"
 )
 
 func main() {
@@ -31,24 +38,51 @@ func main() {
 	}
 	log.Println("Connected to PostgreSQL")
 
-	storage := postgres.NewLogStorage(pool)
+	log.Println("Initializing components")
 
-	entry := &logsstructure.NormalizedLog{
-		ID:                "sha256",
-		Raw_log_id:        1,
-		PC_name:           "kazuma",
-		Username:          "kazuma",
-		Event_description: "aboba",
-		Event_category:    "pizdec",
-		Process_name:      "fortinate",
-		Process_id:        1,
-		Severity:          "INFO",
-		Timestamp:         time.Now(),
+	logStorage := postgres.NewLogStorage(pool)
+	log.Println("Storage initialized")
+
+	logParser := parsers.NewParser()
+	log.Println("Parser initialized")
+
+	logProc := processor.NewLogProc(logParser, logStorage)
+	log.Println("Processor initialized")
+
+	logHandler := delivery.NewLogHandler(logProc)
+	log.Println("Handler initialized")
+
+	log.Println("Starting server *_*")
+
+	portStr := os.Getenv("PORT")
+	listener, err := net.Listen("tcp", portStr)
+	if err != nil {
+		log.Fatalf("Failed to listen port %v", err)
 	}
 
-	if err := storage.Store(entry); err != nil {
-		log.Fatalf("Failed to store log: %v", err)
+	grpcServ := grpc.NewServer(
+		grpc.MaxRecvMsgSize(10*1024*1024),
+		grpc.MaxSendMsgSize(10*1024*1024),
+	)
+
+	pb.RegisterLogServiceServer(grpcServ, logHandler)
+
+	reflection.Register(grpcServ)
+
+	log.Println("Server is ready")
+	log.Println("Ctrl + C to stop")
+
+	go func() {
+		sigChan := make(chan os.Signal, 1)
+		signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+		<-sigChan
+
+		grpcServ.GracefulStop()
+		log.Println("Server stopped")
+	}()
+
+	if err := grpcServ.Serve(listener); err != nil {
+		log.Fatalf("Failed to serve %v", err)
 	}
 
-	log.Println("Success store")
 }

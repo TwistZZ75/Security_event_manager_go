@@ -1,3 +1,4 @@
 /.vscode
 /siem-server/.env
 /siem-server/proto/logs.proto
+/что нужно будет сделать.txt
