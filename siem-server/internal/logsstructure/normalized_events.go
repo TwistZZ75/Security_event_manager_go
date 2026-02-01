@@ -8,7 +8,6 @@ import (
 
 type NormalizedLog struct {
 	ID                string    //идентификатор лога
-	Raw_log_id        int       //идентификатор "сырого" лога, если администратору необходимо будет просмотреть изначальный лог
 	PC_name           string    //имя компьютера с которого пришёл лог
 	Username          string    //имя пользователя у которого лог был сгенерирован
 	Event_description string    //описание события

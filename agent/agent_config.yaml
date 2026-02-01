@@ -1,0 +1,32 @@
+agent:
+  hostname: ""  
+  os: ""        
+
+server:
+  address: "localhost"
+  port: "5000"
+
+collectors:
+  winevent:
+    enabled: false
+    channel:
+      - "Security"
+    eventid: "*" # * - все события из журнала
+    # *[System[(EventID=5156)]] - события с eventID = 5156
+  
+  sysmon:
+    enabled: false
+    channel: "Microsoft-Windows-Sysmon/Operational"
+    eventid: "*" # * - все события из журнала
+  
+  suricata:
+    enabled: false
+    log_path: "/var/log/suricata/eve.json"
+  
+  squid:
+    enabled: false
+    log_path: "/var/log/squid/access.log"
+  
+  syslog:
+    enabled: false
+    log_path: "/var/log/syslog"

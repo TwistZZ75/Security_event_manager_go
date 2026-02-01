@@ -199,7 +199,7 @@ const file_logs_proto_rawDesc = "" +
 	"LogService\x129\n" +
 	"\n" +
 	"SendRawLog\x12\x13.logs.RequestRawLog\x1a\x14.logs.ResponseRawLog\"\x00\x12A\n" +
-	"\x10SendRawLogStream\x12\x13.logs.RequestRawLog\x1a\x14.logs.ResponseRawLog\"\x00(\x01B\x0fZ\rserver/pkg/pbb\x06proto3"
+	"\x10SendRawLogStream\x12\x13.logs.RequestRawLog\x1a\x14.logs.ResponseRawLog\"\x00(\x01B\bZ\x06pkg/pbb\x06proto3"
 
 var (
 	file_logs_proto_rawDescOnce sync.Once
