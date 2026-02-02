@@ -1,58 +1,60 @@
 package config
 
 import (
+	collector "siem-agent/collector"
+
 	"github.com/spf13/viper"
 )
 
 type Config struct {
-	Agent      AgentConfig
-	Server     ServerConfig
-	Collectors CollectorsConfig
+	Agent      AgentConfig      `mapstructure:"agent"`
+	Server     ServerConfig     `mapstructure:"server"`
+	Collectors CollectorsConfig `mapstructure:"collectors"`
 }
 
 type AgentConfig struct {
-	Hostname string
-	OS       string
+	Hostname string `mapstructure:"hostname"`
+	OS       string `mapstructure:"os"`
 }
 
 type ServerConfig struct {
-	Address string
-	Port    string
+	Address string `mapstructure:"address"`
+	Port    string `mapstructure:"port"`
 }
 
 type CollectorsConfig struct {
-	WinEvent WinEventConfig
-	Sysmon   SysmonConfig
-	Suricata SuricataConfig
-	Squid    SquidConfig
-	Syslog   SyslogConfig
+	WinEvent WinEventConfig `mapstructure:"winevent"`
+	Sysmon   SysmonConfig   `mapstructure:"sysmon"`
+	Suricata SuricataConfig `mapstructure:"suricata"`
+	Squid    SquidConfig    `mapstructure:"squid"`
+	Syslog   SyslogConfig   `mapstructure:"syslog"`
 }
 
 type WinEventConfig struct {
-	Enabled bool
-	Channel string
-	EventID string
+	Enabled bool     `mapstructure:"enabled"`
+	Channel []string `mapstructure:"channel"` // Изменено на []string для массива
+	EventID string   `mapstructure:"eventid"`
 }
 
 type SysmonConfig struct {
-	Enabled bool
-	Channel string
-	EventID string
+	Enabled bool     `mapstructure:"enabled"`
+	Channel []string `mapstructure:"channel"` // или string, в зависимости от YAML
+	EventID string   `mapstructure:"eventid"`
 }
 
 type SuricataConfig struct {
-	Enabled bool
-	LogPath string
+	Enabled bool   `mapstructure:"enabled"`
+	LogPath string `mapstructure:"log_path"` // Добавлен тег для snake_case
 }
 
 type SquidConfig struct {
-	Enabled bool
-	LogPath string
+	Enabled bool   `mapstructure:"enabled"`
+	LogPath string `mapstructure:"log_path"` // Добавлен тег для snake_case
 }
 
 type SyslogConfig struct {
-	Enabled bool
-	LogPath string
+	Enabled bool   `mapstructure:"enabled"`
+	LogPath string `mapstructure:"log_path"` // Добавлен тег для snake_case
 }
 
 func LoadConfig(path string) (*Config, error) {
@@ -63,7 +65,10 @@ func LoadConfig(path string) (*Config, error) {
 
 	viper.AutomaticEnv()
 
+	baseInfo := collector.NewBaseCollectorInfo()
 	// Значения по умолчанию
+	viper.SetDefault("agent.hostname", baseInfo.PC_name)
+	viper.SetDefault("agent.os", baseInfo.OS)
 	viper.SetDefault("server.address", "localhost")
 	viper.SetDefault("server.port", "5000")
 

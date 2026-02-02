@@ -9,7 +9,7 @@ import (
 )
 
 type LogCollector interface {
-	Start_collect(ctx context.Context, path string) error
+	Start_collect(ctx context.Context) error
 	Stop_collect() error
 	Logs() <-chan *pb.RequestRawLog
 }
