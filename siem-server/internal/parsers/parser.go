@@ -42,7 +42,7 @@ func (p *ParserStruct) Parser(raw_log *logstructure.RawLog) (*logstructure.Norma
 // принимает сырой лог
 // возвращает хеш строку на основе данных из сырого лога
 func (p *ParserStruct) generateID(raw_log *logstructure.RawLog) string {
-	data := raw_log.Log_source + raw_log.PC_name + raw_log.Event_timestamp.String() + raw_log.Username + raw_log.Raw_data
+	data := raw_log.Log_source + raw_log.PC_name + raw_log.Username + raw_log.Raw_data
 	hashID := sha256.Sum256([]byte(data))
 	return hex.EncodeToString((hashID[:]))
 }
