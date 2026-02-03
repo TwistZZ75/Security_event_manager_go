@@ -31,32 +31,33 @@ type CollectorsConfig struct {
 }
 
 type WinEventConfig struct {
-	Enabled bool     `mapstructure:"enabled"`
-	Channel []string `mapstructure:"channel"` // Изменено на []string для массива
-	EventID string   `mapstructure:"eventid"`
+	Enabled bool   `mapstructure:"enabled"`
+	Channel string `mapstructure:"channel"`
+	EventID string `mapstructure:"eventid"`
 }
 
 type SysmonConfig struct {
-	Enabled bool     `mapstructure:"enabled"`
-	Channel []string `mapstructure:"channel"` // или string, в зависимости от YAML
-	EventID string   `mapstructure:"eventid"`
+	Enabled bool   `mapstructure:"enabled"`
+	Channel string `mapstructure:"channel"`
+	EventID string `mapstructure:"eventid"`
 }
 
 type SuricataConfig struct {
 	Enabled bool   `mapstructure:"enabled"`
-	LogPath string `mapstructure:"log_path"` // Добавлен тег для snake_case
+	LogPath string `mapstructure:"log_path"`
 }
 
 type SquidConfig struct {
 	Enabled bool   `mapstructure:"enabled"`
-	LogPath string `mapstructure:"log_path"` // Добавлен тег для snake_case
+	LogPath string `mapstructure:"log_path"`
 }
 
 type SyslogConfig struct {
 	Enabled bool   `mapstructure:"enabled"`
-	LogPath string `mapstructure:"log_path"` // Добавлен тег для snake_case
+	LogPath string `mapstructure:"log_path"`
 }
 
+// функция загрузки yaml конфига
 func LoadConfig(path string) (*Config, error) {
 	viper.SetConfigName("agent_config")
 	viper.SetConfigType("yaml")

@@ -8,7 +8,7 @@ server:
 
 collectors:
   winevent:
-    enabled: false
+    enabled: true
     channel: "Security"
     eventid: "*" # * - все события из журнала
     # *[System[(EventID=5156)]] - события с eventID = 5156

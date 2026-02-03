@@ -18,6 +18,8 @@ type WinEventCollector struct {
 }
 
 // конструктор WinEventCollector
+// принимает путь к журналу и анализируемые eventID из конфига
+// объект WinEventCollector
 func NewWinEventCollector(path, events string) *WinEventCollector {
 	return &WinEventCollector{
 		path:    path,
@@ -27,6 +29,8 @@ func NewWinEventCollector(path, events string) *WinEventCollector {
 }
 
 // реализация функции из интерфейса LogCollector
+// принимает контекст
+// возвращает ошибку
 func (win *WinEventCollector) Start_collect(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
 	win.cancel = cancel
