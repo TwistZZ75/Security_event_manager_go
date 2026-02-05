@@ -3,11 +3,12 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"os/signal"
-	collector "siem-agent/collector"
+	"siem-agent/collector"
 	"siem-agent/config"
-	"sync"
+	"siem-agent/grpc_ag"
 	"syscall"
 )
 
@@ -17,39 +18,46 @@ func main() {
 	if err != nil {
 		fmt.Println("config truble")
 	}
-	ctx := context.Background()
-	var wg sync.WaitGroup
+
+	//получение информации о системе и пользователе
 	baseInfo := collector.NewBaseCollectorInfo()
 	cfg.Agent.Hostname = baseInfo.PC_name
 	cfg.Agent.OS = baseInfo.OS
 	fmt.Printf("Config: %v\n", cfg)
+
+	//получение адреса и порта из конфига
+	serverAddr := fmt.Sprintf("%s:%s", cfg.Server.Address, cfg.Server.Port)
+	//создание соединения с сервером
+	client, err := grpc_ag.NewLogClient(serverAddr)
+	if err != nil {
+		fmt.Printf("Failed to connect to server %v", err)
+	}
+	log.Printf("Connecting to server: %s", serverAddr)
+	defer client.Close()
+
+	//создание контекста
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	//запуск коллекторов
+	collectors := grpc_ag.StartAllCollectors(ctx, cfg)
+
+	//запуск горутины для сбора логов и их буфферизации для каждого из коллекторов
+	go grpc_ag.BatchLogs(ctx, client, collectors)
+
 	// Обработка Ctrl+C
 	signalChan := make(chan os.Signal, 1)
 	signal.Notify(signalChan, os.Interrupt, syscall.SIGTERM)
-	if cfg.Collectors.WinEvent.Enabled == true {
-		winCollect := collector.NewWinEventCollector(cfg.Collectors.WinEvent.Channel, cfg.Collectors.WinEvent.EventID)
 
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			err := winCollect.Start_collect(ctx)
-			if err != nil {
-				fmt.Printf("Error starting WinEvent collector: %v\n", err)
-				return
-			}
+	// Ожидаем сигнал Ctrl+C
+	<-signalChan
 
-			logEntry := <-winCollect.GetLogs()
-			fmt.Printf("Received log: %v\n\n", logEntry)
-			fmt.Println("======================================================")
-		}()
-		// fmt.Printf("WinEvents: %v\n", winCollect.Start_collect(ctx))
-
-		// Ожидаем сигнал Ctrl+C
-		<-signalChan
-		fmt.Println("\nПолучен сигнал завершения. Останавливаем сбор логов...")
-
-		// Останавливаем коллектор
-		winCollect.Stop()
+	//остановка всех коллекторов
+	for _, col := range collectors {
+		col.Stop_collect()
 	}
+	fmt.Println("\nПолучен сигнал завершения. Останавливаем сбор логов...")
+
+	//cancel()
 
 }

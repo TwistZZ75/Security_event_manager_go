@@ -10,7 +10,7 @@ collectors:
   winevent:
     enabled: true
     channel: "Security"
-    eventid: "*" # * - все события из журнала
+    eventid: "* [System[(EventID=5158)]]" # * - все события из журнала
     # *[System[(EventID=5156)]] - события с eventID = 5156
   
   sysmon:

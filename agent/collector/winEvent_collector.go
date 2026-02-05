@@ -87,16 +87,16 @@ func (win *WinEventCollector) CollectFromChannel(ctx context.Context, path strin
 	}
 }
 
-// GetLogs возвращает канал для чтения логов
-func (win *WinEventCollector) GetLogs() <-chan *pb.RequestRawLog {
-	return win.logChan
-}
-
 // Stop останавливает коллектор
-func (win *WinEventCollector) Stop() error {
+func (win *WinEventCollector) Stop_collect() error {
 	if win.cancel != nil {
 		win.cancel()
 	}
 	close(win.logChan)
 	return nil
+}
+
+// GetLogs возвращает канал для чтения логов
+func (win *WinEventCollector) GetLogs() <-chan *pb.RequestRawLog {
+	return win.logChan
 }
