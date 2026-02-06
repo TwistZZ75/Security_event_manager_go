@@ -38,8 +38,8 @@ func (r *LogStorage) Store(entry *logsstructure.NormalizedLog) error {
 	//запрос к БД
 	query := `
 	INSERT INTO normalized_events (id, pc_name, username, event_description, 
-	event_category, process_name, severity, timestamp, os, source)
-	VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+	event_category, process_name, severity, timestamp, os, source, raw_log)
+	VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 	ON CONFLICT (id) DO NOTHING
 	`
 	// выполняем операцию Exec, игнорируем результат её выполнения, если он не ошибка
@@ -55,6 +55,7 @@ func (r *LogStorage) Store(entry *logsstructure.NormalizedLog) error {
 		entry.Timestamp,
 		entry.OS,
 		entry.Source,
+		entry.Raw_log,
 	)
 	return error //возвращаем ошибку или nil
 }

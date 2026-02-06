@@ -26,15 +26,16 @@ func (p *ParserStruct) Parser(raw_log *logstructure.RawLog) (*logstructure.Norma
 		ID:                p.generateID(raw_log),
 		PC_name:           raw_log.PC_name,
 		Username:          raw_log.Username,
-		Event_description: raw_log.Raw_data,
-		Event_category:    raw_log.Raw_data,
-		Process_name:      raw_log.Raw_data,
+		Event_description: raw_log.Username,
+		Event_category:    raw_log.Username,
+		Process_name:      raw_log.Username,
 		Severity:          p.Define_Severity(raw_log),
 		Timestamp:         raw_log.Event_timestamp,
 		OS:                raw_log.OS,
 		Source:            raw_log.Log_source,
+		Raw_log:           raw_log.Raw_data,
 	}
-
+	//fmt.Println(NormalizedLog)
 	return NormalizedLog, nil
 }
 

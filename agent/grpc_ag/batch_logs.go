@@ -37,7 +37,7 @@ func BatchLogs(ctx context.Context, client *LogClient, collectors []collector.Lo
 				if err := client.SendLogBatch(ctx, batch); err != nil {
 					fmt.Printf("%v", err)
 				}
-				batch = make([]*pb.RequestRawLog, batchSize)
+				batch = make([]*pb.RequestRawLog, 0, batchSize)
 			}
 		//отправляем буфер по таймеру, даже если он не заполнен полностью
 		case <-ticker.C:
@@ -45,7 +45,7 @@ func BatchLogs(ctx context.Context, client *LogClient, collectors []collector.Lo
 				if err := client.SendLogBatch(ctx, batch); err != nil {
 					fmt.Printf("%v", err)
 				}
-				batch = make([]*pb.RequestRawLog, batchSize)
+				batch = make([]*pb.RequestRawLog, 0, batchSize)
 			}
 		}
 	}

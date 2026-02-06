@@ -17,4 +17,5 @@ type NormalizedLog struct {
 	Timestamp         time.Time //время создания события
 	OS                string    //ОС
 	Source            string    //источник лога
+	Raw_log           string    //исходный лог
 }
