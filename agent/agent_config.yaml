@@ -14,12 +14,12 @@ collectors:
     # *[System[(EventID=5156)]] - события с eventID = 5156
   
   sysmon:
-    enabled: false
+    enabled: true
     channel: "Microsoft-Windows-Sysmon/Operational"
     eventid: "*" # * - все события из журнала
   
   suricata:
-    enabled: false
+    enabled: true
     log_path: "/var/log/suricata/eve.json"
   
   squid:

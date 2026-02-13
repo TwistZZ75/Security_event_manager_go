@@ -24,7 +24,8 @@ func NewWinEventCollector(path, events string) *WinEventCollector {
 	return &WinEventCollector{
 		path:    path,
 		events:  events,
-		logChan: make(chan *pb.RequestRawLog, 100),
+		logChan: make(chan *pb.RequestRawLog, 100), //создаётся буфферизированный канал,
+		// который позволяет не блокировать отправку данных в канал пока их оттуда не заберут
 	}
 }
 
@@ -34,14 +35,14 @@ func NewWinEventCollector(path, events string) *WinEventCollector {
 func (win *WinEventCollector) Start_collect(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
 	win.cancel = cancel
-	go win.CollectFromChannel(ctx, win.path)
+	go win.CollectFromChannel(ctx)
 	return nil
 }
 
 // функция сбора логов winEvent
-// получает контекст и строку пути к просматриваемому журналу
+// получает контекст
 // ничего не возвращает
-func (win *WinEventCollector) CollectFromChannel(ctx context.Context, path string) {
+func (win *WinEventCollector) CollectFromChannel(ctx context.Context) {
 	baseInfo := NewBaseCollectorInfo()
 
 	watcher, err := winlog.NewWinLogWatcher()
@@ -51,7 +52,7 @@ func (win *WinEventCollector) CollectFromChannel(ctx context.Context, path strin
 	}
 	defer watcher.Shutdown()
 
-	watcher.SubscribeFromNow(path, win.events)
+	watcher.SubscribeFromNow(win.path, win.events)
 	for {
 		select {
 		case <-ctx.Done():

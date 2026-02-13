@@ -11,7 +11,7 @@ import (
 type Event struct {
 	XMLName   xml.Name  `xml:"Event"`
 	System    System    `xml:"System"`
-	EventData EventData `xml:"EventData"` // EventData находится на уровне System, а не внутри него
+	EventData EventData `xml:"EventData"`
 }
 
 type System struct {
@@ -37,7 +37,7 @@ type System struct {
 }
 
 type EventData struct {
-	Data []DataField `xml:"Data"` // Здесь хранятся данные
+	Data []DataField `xml:"Data"`
 }
 
 type DataField struct {
@@ -92,7 +92,7 @@ func (p *ParserStruct) generateID(raw_log *logstructure.RawLog) string {
 }
 
 // функция определения критичности события
-// принимает строку
+// принимает строку, которая должна содержать xml лог
 // возвращает строку
 func (p *ParserStruct) Define_Severity(raw_log string) string {
 
@@ -122,7 +122,7 @@ func (p *ParserStruct) Define_Severity(raw_log string) string {
 }
 
 // функция определения категории события
-// принимает строку
+// принимает строку, которая должна содержать xml лог
 // возвращает строку
 func (p *ParserStruct) Define_EventCategory(raw_log string) string {
 	var event Event
@@ -170,7 +170,7 @@ func (p *ParserStruct) categorizeSecurityEvent(eventID int) string {
 }
 
 // функция определения описания события
-// принимает строку
+// принимает строку, которая должна содержать xml лог
 // возвращает строку
 func (p *ParserStruct) Define_EventDescription(raw_log string) string {
 	var event Event
@@ -191,7 +191,7 @@ func (p *ParserStruct) Define_EventDescription(raw_log string) string {
 }
 
 // функция определения имени процесса
-// принимает строку
+// принимает строку, которая должна содержать xml лог
 // возвращает строку
 func (p *ParserStruct) Define_ProcessName(raw_log string) string {
 	var event Event
