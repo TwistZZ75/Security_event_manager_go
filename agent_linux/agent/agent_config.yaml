@@ -1,0 +1,20 @@
+agent:
+  hostname: ""  
+  os: ""        
+
+server:
+  address: "localhost"
+  port: "5000"
+
+collectors:
+  suricata:
+    enabled: true
+    log_path: "/var/log/suricata/eve.json"
+  
+  squid:
+    enabled: false
+    log_path: "/var/log/squid/access.log"
+  
+  syslog:
+    enabled: false
+    log_path: "/var/log/syslog"

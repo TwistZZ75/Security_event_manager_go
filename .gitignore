@@ -2,4 +2,6 @@
 /siem-server/.env
 /siem-server/proto/logs.proto
 /что нужно будет сделать.md
-/agent/proto/logs.proto
+/agent_linux/agent/proto/logs.proto
+/agent_windows/agent/proto/logs.proto
+/agent
