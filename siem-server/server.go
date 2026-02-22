@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net"
 	"os"
@@ -11,6 +12,7 @@ import (
 	processor "siem-server/internal/processor"
 	postgres "siem-server/internal/storage/postgres"
 	"siem-server/proto/server/pkg/pb"
+	"siem-server/rules"
 	"syscall"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -42,6 +44,21 @@ func main() {
 	}
 	log.Println("Connected to PostgreSQL")
 
+	/////////////////////////////////////////////////////////////////////////
+
+	ruleStorage := rules.NewRuleStorage(pool)
+
+	rulesList, err := ruleStorage.GetAllRules(ctx)
+	if err != nil {
+		log.Printf("Ошибка загрузки правил: %v", err)
+	} else {
+		fmt.Printf("Загружено правил: %d\n", len(rulesList))
+		for i, rule := range rulesList {
+			fmt.Printf("  %d. % v\n", i+1, rule)
+		}
+	}
+
+	////////////////////////////////////////////////////////////////////////
 	log.Println("Initializing components")
 
 	//Инициализация компонентов

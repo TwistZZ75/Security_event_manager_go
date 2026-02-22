@@ -3,17 +3,18 @@ package processor
 import (
 	logstructure "siem-server/internal/logsstructure"
 	parsers "siem-server/internal/parsers"
+	"siem-server/internal/storage/postgres"
 )
 
 // обращаемся к интерфейсам, а не к конкретным структурам для того, чтобы не зависеть от конкретных реализаций
 // нужных нам структур, т.е. у нас здесь ничего не сломается, если мы перейдём с Postgres на MySQL или Redis
 type LogProc struct {
-	parser  parsers.LogParser       //интерфейс парсера
-	storage logstructure.LogStorage //интерфейс хранилища (работа с БД)
+	parser  parsers.LogParser            //интерфейс парсера
+	storage postgres.LogStorageInterface //интерфейс хранилища (работа с БД)
 }
 
 // создаём конструктор структуры LogProc
-func NewLogProc(pars parsers.LogParser, stor logstructure.LogStorage) *LogProc {
+func NewLogProc(pars parsers.LogParser, stor postgres.LogStorageInterface) *LogProc {
 	return &LogProc{parser: pars, storage: stor}
 }
 
