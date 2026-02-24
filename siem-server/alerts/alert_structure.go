@@ -29,3 +29,22 @@ const (
 	StatusResolved      = "resolved"
 	StatusFalsePositive = "false_positive"
 )
+
+// фильтр для поиска алертов
+type AlertFilter struct {
+	RuleID   string
+	Severity string
+	Status   string
+	From     time.Time
+	To       time.Time
+	Limit    int
+	Offset   int
+}
+
+// статистика по алертам
+type AlertStats struct {
+	Total          int64            `json:"total"`
+	BySeverity     map[string]int64 `json:"by_severity"`
+	ByStatus       map[string]int64 `json:"by_status"`
+	AverageResTime float64          `json:"average_resolution_time_hours"`
+}

@@ -16,14 +16,14 @@ type RuleStorage struct {
 	pool *pgxpool.Pool
 }
 
-type RuleStorageInterface interface {
-	AddRule(ctx context.Context, rule *Rule) error
-	RemoveRule(ctx context.Context, ruleId string) error
-	UpdateRule(ctx context.Context, rule *Rule) error
-	GetAllRules(ctx context.Context) ([]*Rule, error)
-	GetRule(ctx context.Context, ruleId string) (*Rule, error)
-	GetRulesCount() (int, error)
-}
+// type RuleStorageInterface interface {
+// 	AddRule(ctx context.Context, rule *Rule) error
+// 	RemoveRule(ctx context.Context, ruleId string) error
+// 	UpdateRule(ctx context.Context, rule *Rule) error
+// 	GetAllRules(ctx context.Context) ([]*Rule, error)
+// 	GetRule(ctx context.Context, ruleId string) (*Rule, error)
+// 	GetRulesCount() (int, error)
+// }
 
 // конструктор
 func NewRuleStorage(pool *pgxpool.Pool) *RuleStorage {
@@ -191,7 +191,7 @@ func (rst *RuleStorage) GetAllRules(ctx context.Context) ([]*Rule, error) {
 	//получаем строки из бд согласно запросу
 	rows, err := rst.pool.Query(ctx, query)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query rules: %v", err)
+		return nil, fmt.Errorf("Failed to query rules: %v", err)
 	}
 	defer rows.Close()
 
@@ -200,72 +200,17 @@ func (rst *RuleStorage) GetAllRules(ctx context.Context) ([]*Rule, error) {
 
 	//для каждой строки
 	for rows.Next() {
-		//структура правила
-		var (
-			id             string
-			name           string
-			enabled        bool
-			severity       string
-			definitionJSON []byte
-			tags           []string
-			createdBy      string
-			createdAt      time.Time
-			updatedBy      string
-			updatedAt      *time.Time
-			lastTriggered  *time.Time
-			triggerCount   int64
-		)
-		//сохраняем считанные из строки значения по адресам структуры выше
-		err := rows.Scan(
-			&id,
-			&name,
-			&enabled,
-			&severity,
-			&definitionJSON,
-			&tags,
-			&createdBy,
-			&createdAt,
-			&updatedBy,
-			&updatedAt,
-			&lastTriggered,
-			&triggerCount,
-		)
+		rule, err := rst.ScanRule(rows)
 		if err != nil {
-			return nil, fmt.Errorf("failed to scan rule row: %v", err)
-		}
-
-		// Десериализуем rule_definition из JSONB
-		var definition Rule
-		if err := json.Unmarshal(definitionJSON, &definition); err != nil {
-			// Логируем ошибку, но продолжаем загрузку других правил
-			fmt.Printf("Warning: failed to unmarshal rule %s: %v\n", id, err)
+			fmt.Printf("Failed to scan rule: %v\n", err)
 			continue
-		}
-
-		// Создаем объект Rule
-		rule := &Rule{
-			ID:            id,
-			Name:          name,
-			OS:            definition.OS,
-			Enabled:       enabled,
-			Severity:      severity,
-			Conditions:    definition.Conditions,
-			Aggregation:   definition.Aggregation,
-			Actions:       definition.Actions,
-			Tags:          tags,
-			CreatedBy:     createdBy,
-			CreatedAt:     createdAt,
-			UpdatedBy:     updatedBy,
-			UpdatedAt:     updatedAt,
-			LastTriggered: lastTriggered,
-			TriggerCount:  triggerCount,
 		}
 
 		rulesList = append(rulesList, rule)
 	}
 
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating rules: %v", err)
+		return nil, fmt.Errorf("Error iterating rules: %v", err)
 	}
 
 	return rulesList, nil
@@ -274,7 +219,7 @@ func (rst *RuleStorage) GetAllRules(ctx context.Context) ([]*Rule, error) {
 // функция получения одного правила
 // принимает контекст и id правила
 // возвращает правило
-func (rs *RuleStorage) GetRule(ctx context.Context, id string) (*Rule, error) {
+func (rst *RuleStorage) GetRule(ctx context.Context, id string) (*Rule, error) {
 
 	//запрос к бд
 	query := `
@@ -294,7 +239,21 @@ func (rs *RuleStorage) GetRule(ctx context.Context, id string) (*Rule, error) {
         FROM rules
         WHERE id = $1
     `
+	row := rst.pool.QueryRow(ctx, query, id)
+	rule, err := rst.ScanRule(row)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to scan rule: %v \n", err)
+	}
+	return rule, nil
+}
 
+// функция сканирования правила в структуру БД
+// принимает объект, имеющий функцию Scan (в нашем случае pgx.Row,
+// но это также может быть и *sql.Row (результат QueryRow), и *sql.Rows (после вызова Next()))
+// возвращает правило и ошибку
+func (rst *RuleStorage) ScanRule(scanner interface {
+	Scan(dest ...interface{}) error
+}) (*Rule, error) {
 	//структура получаемого правила
 	var (
 		ruleID         string
@@ -312,7 +271,7 @@ func (rs *RuleStorage) GetRule(ctx context.Context, id string) (*Rule, error) {
 	)
 
 	//сохраняем считанные из строки значения по адресам структуры выше
-	err := rs.pool.QueryRow(ctx, query, id).Scan(
+	err := scanner.Scan(
 		&ruleID,
 		&name,
 		&enabled,
@@ -357,16 +316,15 @@ func (rs *RuleStorage) GetRule(ctx context.Context, id string) (*Rule, error) {
 		LastTriggered: lastTriggered,
 		TriggerCount:  triggerCount,
 	}
-
 	return rule, nil
 }
 
 // функция получения числа правил
 // принимает контекст
 // возвращает число правил и ошибку
-func (rs *RuleStorage) GetRulesCount(ctx context.Context) (int, error) {
+func (rst *RuleStorage) GetRulesCount(ctx context.Context) (int, error) {
 	//проверяем наличие соединений с БД
-	if rs.pool == nil {
+	if rst.pool == nil {
 		return 0, fmt.Errorf("database pool is nil")
 	}
 
@@ -374,7 +332,7 @@ func (rs *RuleStorage) GetRulesCount(ctx context.Context) (int, error) {
 	query := `SELECT COUNT(*) FROM rules`
 
 	var count int
-	err := rs.pool.QueryRow(ctx, query).Scan(&count)
+	err := rst.pool.QueryRow(ctx, query).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("failed to count rules: %v", err)
 	}
