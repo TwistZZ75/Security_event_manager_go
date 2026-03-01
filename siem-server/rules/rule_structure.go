@@ -91,3 +91,12 @@ const (
 	SeverityHigh     = "high"
 	SeverityCritical = "critical"
 )
+
+type RuleFilter struct {
+	Severity   string
+	Enabled    bool
+	EnabledSet bool // Флаг, указывающий что фильтр Enabled был установлен
+	Tags       []string
+	Limit      int
+	Offset     int
+}

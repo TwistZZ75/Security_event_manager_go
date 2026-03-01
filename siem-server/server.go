@@ -2,18 +2,22 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"net"
 	"os"
 	"os/signal"
+	"siem-server/actions"
+	"siem-server/agent"
+	"siem-server/alerts"
 	"siem-server/internal/delivery"
 	"siem-server/internal/parsers"
 	processor "siem-server/internal/processor"
 	postgres "siem-server/internal/storage/postgres"
 	"siem-server/proto/server/pkg/pb"
 	"siem-server/rules"
+	"siem-server/state"
 	"syscall"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/joho/godotenv"
@@ -24,97 +28,158 @@ import (
 func main() {
 
 	log.Println("Starting SIEM server...")
-	//загружаем переменные окружения из файла .env
+
+	// Загружаем переменные окружения
 	if err := godotenv.Load(); err != nil {
 		log.Print("No .env file found")
 	}
-	//получаем переменную окружения DataBaseURL
+
+	// Подключение к БД
 	connString := os.Getenv("DB_URL")
 	ctx := context.Background()
-	//создаём пул соединений с БД
+
 	pool, err := pgxpool.New(ctx, connString)
 	if err != nil {
 		log.Fatalf("Failed to connect to database: %v", err)
 	}
-	defer pool.Close() //определяем закрытие пула соединений с БД после завершения main()
+	defer pool.Close()
 
-	//проверяем соединение с БД при помощи Ping()
 	if err := pool.Ping(ctx); err != nil {
-		log.Fatalf("Failed to ping to database: %v", err)
+		log.Fatalf("Failed to ping database: %v", err)
 	}
-	log.Println("Connected to PostgreSQL")
+	log.Println("✓ Connected to PostgreSQL")
 
-	/////////////////////////////////////////////////////////////////////////
+	log.Println("Initializing storage layers...")
 
-	ruleStorage := rules.NewRuleStorage(pool)
-
-	rulesList, err := ruleStorage.GetAllRules(ctx)
-	if err != nil {
-		log.Printf("Ошибка загрузки правил: %v", err)
-	} else {
-		fmt.Printf("Загружено правил: %d\n", len(rulesList))
-		for i, rule := range rulesList {
-			fmt.Printf("  %d. % v\n", i+1, rule)
-		}
-	}
-
-	////////////////////////////////////////////////////////////////////////
-	log.Println("Initializing components")
-
-	//Инициализация компонентов
-	//1. создаём новый экземпляр хранилища
 	logStorage := postgres.NewLogStorage(pool)
-	log.Println("Storage initialized")
+	ruleStorage := rules.NewRuleStorage(pool)
+	alertStorage := alerts.NewAlertStorage(pool)
+	actionStorage := actions.NewActionStorage(pool)
+	stateStorage := state.NewStateStorage(pool)
+	commandQueue := agent.NewCommandQueue(pool)
+	//agentStorage := agent.NewAgentStorage(pool)
 
-	//2. создаём новый экземпляр парсера
+	notifier := actions.NewMultiNotifier()
+	agentComm := actions.NewGRPCAgentComm(commandQueue)
+
+	alertMgr := alerts.NewAlertManager(alertStorage, notifier)
+	actionDsp := actions.NewDispatcher(actionStorage, agentComm, notifier)
+
+	log.Println("✓ Storage layers initialized")
+
+	log.Println("Initializing Rule Engine...")
+
+	ruleEngine := rules.NewEngine(
+		ruleStorage,
+		alertMgr,
+		actionDsp,
+		stateStorage,
+	)
+
+	// Загружаем правила из БД
+	if err := ruleEngine.LoadRules(ctx); err != nil {
+		log.Fatalf("Failed to load rules: %v", err)
+	}
+
+	// Выводим информацию о загруженных правилах
+	rulesCount, _ := ruleStorage.GetEnabledRulesCount(ctx)
+	log.Printf("✓ Rule Engine initialized with %d enabled rules", rulesCount)
+
+	// ============================================================================
+	// PROCESSORS
+	// ============================================================================
+	log.Println("Initializing processors...")
+
 	logParser := parsers.NewParser()
-	log.Println("Parser initialized")
 
-	//3. создаём новый процессор обработки лога
-	logProc := processor.NewLogProc(logParser, logStorage)
-	log.Println("Processor initialized")
+	// ВАЖНО: Передаем ruleEngine в LogProc!
+	logProc := processor.NewLogProc(logParser, logStorage, ruleEngine)
 
-	//4. создаём новый обработчик
+	log.Println("✓ Processors initialized")
+
+	// ============================================================================
+	// HANDLERS
+	// ============================================================================
+	log.Println("Initializing handlers...")
+
 	logHandler := delivery.NewLogHandler(logProc)
-	log.Println("Handler initialized")
+	// TODO: Добавить другие handlers когда будут готовы
+	// ruleHandler := delivery.NewRuleHandler(ruleStorage, alertStorage)
+	// agentHandler := delivery.NewAgentHandler(agentStorage, commandQueue)
 
-	log.Println("Starting server *_*")
+	log.Println("✓ Handlers initialized")
 
-	//получаем из .env переменную порта
+	// ============================================================================
+	// BACKGROUND TASKS
+	// ============================================================================
+	log.Println("Starting background tasks...")
+
+	// Задача 1: Очистка истекших состояний (каждые 5 минут)
+	go func() {
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+
+		for range ticker.C {
+			if err := stateStorage.DeleteExpiredStates(ctx); err != nil {
+				log.Printf("Failed to cleanup expired states: %v", err)
+			}
+		}
+	}()
+
+	// Задача 2: Перезагрузка правил (каждые 5 минут)
+	go func() {
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+
+		for range ticker.C {
+			if err := ruleEngine.ReloadRules(ctx); err != nil {
+				log.Printf("Failed to reload rules: %v", err)
+			} else {
+				count, _ := ruleStorage.GetEnabledRulesCount(ctx)
+				log.Printf("✓ Rules reloaded: %d enabled", count)
+			}
+		}
+	}()
+
+	log.Println("✓ Background tasks started")
+
+	// ============================================================================
+	// gRPC SERVER
+	// ============================================================================
+	log.Println("Starting gRPC server...")
+
 	portStr := os.Getenv("PORT")
-	//начинаем прослушивание порта
 	listener, err := net.Listen("tcp", portStr)
 	if err != nil {
-		log.Fatalf("Failed to listen port %v", err)
+		log.Fatalf("Failed to listen port: %v", err)
 	}
 
-	//определяем максимальный размер принимаемого и отправляемого сообщения
 	grpcServ := grpc.NewServer(
 		grpc.MaxRecvMsgSize(10*1024*1024),
 		grpc.MaxSendMsgSize(10*1024*1024),
 	)
 
-	//регистрируем logHandler как обработчик logService
-	//для того чтобы все обращения клиентов к SendRawLog() направлялись в logHandler.SendRawLog()
+	// Регистрируем сервисы
 	pb.RegisterLogServiceServer(grpcServ, logHandler)
 
-	reflection.Register(grpcServ) //для отладки
+	reflection.Register(grpcServ)
 
-	log.Println("Server is ready")
-	log.Println("Ctrl + C to stop")
+	log.Printf("✓ Server is ready on %s", portStr)
+	log.Println("Press Ctrl+C to stop")
 
-	//функция остановки сервера
+	// Graceful shutdown
 	go func() {
 		sigChan := make(chan os.Signal, 1)
 		signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 		<-sigChan
 
+		log.Println("Shutting down server...")
 		grpcServ.GracefulStop()
-		log.Println("Server stopped")
+		log.Println("✓ Server stopped")
 	}()
 
+	// Запускаем сервер
 	if err := grpcServ.Serve(listener); err != nil {
-		log.Fatalf("Failed to serve %v", err)
+		log.Fatalf("Failed to serve: %v", err)
 	}
-
 }

@@ -177,7 +177,7 @@ func (xml_p *ParseXmlStruct) Define_EventDescription(raw_log string) string {
 	case 4624:
 		return "Учётная запись успешно вошла в систему"
 	case 4625:
-		return "Отказ во входе в систему для учётной записи"
+		return "Login failure for the account"
 	case 5158:
 		return "Разрешён прослушивающий сокет"
 	default:

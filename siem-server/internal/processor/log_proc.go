@@ -1,32 +1,69 @@
 package processor
 
 import (
-	logstructure "siem-server/internal/logsstructure"
-	parsers "siem-server/internal/parsers"
+	"context"
+	"fmt"
+	"log"
+
+	"siem-server/internal/logsstructure"
+	"siem-server/internal/parsers"
 	"siem-server/internal/storage/postgres"
+	"siem-server/rules"
 )
 
-// обращаемся к интерфейсам, а не к конкретным структурам для того, чтобы не зависеть от конкретных реализаций
-// нужных нам структур, т.е. у нас здесь ничего не сломается, если мы перейдём с Postgres на MySQL или Redis
 type LogProc struct {
-	parser  parsers.LogParser            //интерфейс парсера
-	storage postgres.LogStorageInterface //интерфейс хранилища (работа с БД)
+	parser     *parsers.Parser
+	storage    *postgres.LogStorage
+	ruleEngine *rules.Engine
 }
 
-// создаём конструктор структуры LogProc
-func NewLogProc(pars parsers.LogParser, stor postgres.LogStorageInterface) *LogProc {
-	return &LogProc{parser: pars, storage: stor}
+// NewLogProc создает новый процессор логов
+func NewLogProc(
+	parser *parsers.Parser,
+	storage *postgres.LogStorage,
+	ruleEngine *rules.Engine,
+) *LogProc {
+	return &LogProc{
+		parser:     parser,
+		storage:    storage,
+		ruleEngine: ruleEngine,
+	}
 }
 
-// функция описывающая процесс обработки лога (пока парсинг и сохранение)
-// принимает сырой лог
-// возвращает ошибку или nil
-func (Lp *LogProc) ProcessRawLog(raw *logstructure.RawLog) error {
-	//парсим сырой лог
-	normLog, err := Lp.parser.Parser(raw) //вызов парсера через структуру LogProc в поле которой указан интерфейс parser
-	if err != nil {                       //проверяем произошла ли при парсинге ошибка
-		return err
+// ProcessLog обрабатывает сырой лог
+func (lp *LogProc) ProcessLog(ctx context.Context, rawLog *logsstructure.RawLog) error {
+	// 1. ПАРСИНГ
+	normLog, err := lp.parser.Parser(rawLog)
+	if err != nil {
+		return fmt.Errorf("failed to parse log: %v", err)
 	}
 
-	return Lp.storage.Store(normLog) //сохраняем лог в БД и возвращаем результат (ошибка сохранения или nil)
+	// 2. СОХРАНЕНИЕ В БД
+	if err := lp.storage.Store(normLog); err != nil {
+		// Логируем ошибку, но продолжаем обработку
+		log.Printf("Failed to save log to DB: %v", err)
+	}
+
+	// 3. ПРОВЕРКА ПРАВИЛ ← САМОЕ ВАЖНОЕ ДОБАВЛЕНИЕ!
+	if lp.ruleEngine != nil {
+		if err := lp.ruleEngine.Evaluate(ctx, normLog); err != nil {
+			// Логируем ошибку, но не прерываем обработку
+			log.Printf("Rule evaluation failed: %v", err)
+		}
+	} else {
+		log.Printf("Warning: Rule Engine is nil, rules not evaluated!")
+	}
+
+	return nil
+}
+
+// ProcessBatch обрабатывает пакет логов
+func (lp *LogProc) ProcessBatch(ctx context.Context, rawLogs []*logsstructure.RawLog) error {
+	for _, rawLog := range rawLogs {
+		if err := lp.ProcessLog(ctx, rawLog); err != nil {
+			log.Printf("Failed to process log: %v", err)
+			// Продолжаем обработку остальных логов
+		}
+	}
+	return nil
 }

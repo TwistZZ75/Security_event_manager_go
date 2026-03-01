@@ -5,3 +5,5 @@
 /agent_linux/agent/proto/logs.proto
 /agent_windows/agent/proto/logs.proto
 /agent_old
+/agent_linux/agent/proto/agent_service.proto
+/siem-server/proto/agent_service.proto

@@ -1,0 +1,137 @@
+syntax = "proto3";
+
+package siem.agent;
+
+option go_package = "siem-server/proto/agent/pkg/pb";
+
+import "google/protobuf/timestamp.proto";
+
+// ============================================================================
+// AgentService - Связь между сервером и агентами на клиентах
+// ============================================================================
+
+service AgentService {
+    // ========== Получение команд от сервера ==========
+    
+    // GetPendingCommands получает список ожидающих команд для агента
+    // Агент вызывает этот метод периодически (каждые 10 секунд)
+    rpc GetPendingCommands(GetPendingCommandsRequest) returns (GetPendingCommandsResponse);
+    
+    // ReportCommandResult отправляет результат выполнения команды
+    rpc ReportCommandResult(ReportCommandResultRequest) returns (ReportCommandResultResponse);
+    
+    // ========== Статус и heartbeat ==========
+    
+    // Heartbeat отправляет heartbeat от агента (агент жив)
+    rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+    
+    // GetAgentStatus получает статус агента
+    rpc GetAgentStatus(GetAgentStatusRequest) returns (GetAgentStatusResponse);
+    
+    // RegisterAgent регистрирует новый агент при первом запуске
+    rpc RegisterAgent(RegisterAgentRequest) returns (RegisterAgentResponse);
+}
+
+// ============================================================================
+// Структуры для команд
+// ============================================================================
+
+// AgentCommand команда для агента
+message AgentCommand {
+    int64 command_id = 1;
+    string command_type = 2; // block_account, block_network, kill_process, quarantine_file, unblock_account, unblock_network
+    map<string, string> parameters = 3;
+    int64 alert_id = 4; // ID алерта, который инициировал команду
+    google.protobuf.Timestamp created_at = 5;
+    string priority = 6; // low, medium, high, critical
+}
+
+// CommandResult результат выполнения команды
+message CommandResult {
+    int64 command_id = 1;
+    bool success = 2;
+    string result = 3; // описание результата
+    string error = 4; // ошибка, если была
+    google.protobuf.Timestamp completed_at = 5;
+}
+
+// ============================================================================
+// Структуры для статуса агента
+// ============================================================================
+
+// AgentInfo информация об агенте
+message AgentInfo {
+    string hostname = 1;
+    string os = 2; // Windows, Linux
+    string os_version = 3;
+    string agent_version = 4;
+    string ip_address = 5;
+    google.protobuf.Timestamp last_seen = 6;
+    string status = 7; // online, offline, error
+    map<string, string> metadata = 8; // дополнительная информация
+}
+
+// ============================================================================
+// Запросы и ответы для команд
+// ============================================================================
+
+message GetPendingCommandsRequest {
+    string hostname = 1;
+    string agent_version = 2;
+}
+
+message GetPendingCommandsResponse {
+    repeated AgentCommand commands = 1;
+}
+
+message ReportCommandResultRequest {
+    CommandResult result = 1;
+    string hostname = 2;
+}
+
+message ReportCommandResultResponse {
+    bool success = 1;
+    string message = 2;
+}
+
+// ============================================================================
+// Запросы и ответы для статуса
+// ============================================================================
+
+message HeartbeatRequest {
+    string hostname = 1;
+    string agent_version = 2;
+    string status = 3; // running, idle, busy
+    map<string, string> metrics = 4; // cpu_usage, memory_usage, etc.
+}
+
+message HeartbeatResponse {
+    bool success = 1;
+    int32 next_heartbeat_interval = 2; // секунды до следующего heartbeat
+}
+
+message GetAgentStatusRequest {
+    string hostname = 1;
+}
+
+message GetAgentStatusResponse {
+    AgentInfo agent = 1;
+    bool online = 2;
+    repeated CommandResult recent_commands = 3; // последние N выполненных команд
+}
+
+message RegisterAgentRequest {
+    string hostname = 1;
+    string os = 2;
+    string os_version = 3;
+    string agent_version = 4;
+    string ip_address = 5;
+    map<string, string> metadata = 6;
+}
+
+message RegisterAgentResponse {
+    bool success = 1;
+    string message = 2;
+    string agent_id = 3;
+    int32 polling_interval = 4; // секунды между опросами команд
+}
