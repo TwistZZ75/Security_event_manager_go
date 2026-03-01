@@ -207,14 +207,15 @@ func (ast *AlertStorage) GetAlerts(ctx context.Context, filter AlertFilter) ([]*
 	// Сортировка
 	query += " ORDER BY created_at DESC"
 
-	// Пагинация
-	if filter.Limit > 0 {
+	// Пагинация - разделение большого объёма на меньшие (страницы)
+	// выводить не весь объём алертов, а по 100/50/25 на странице
+	if filter.Limit > 0 { //по сколько выводить
 		query += fmt.Sprintf(" LIMIT $%d", argPos)
 		args = append(args, filter.Limit)
 		argPos++
 	}
 
-	if filter.Offset > 0 {
+	if filter.Offset > 0 { //с какого начинать на данной странице
 		query += fmt.Sprintf(" OFFSET $%d", argPos)
 		args = append(args, filter.Offset)
 	}

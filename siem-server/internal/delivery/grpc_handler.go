@@ -43,7 +43,7 @@ func (handler *LogHandler) SendRawLog(ctx context.Context, req *pb.RequestRawLog
 	}
 
 	//вызов функции обработки лога (его парсинга и сохранения в бд)
-	if err := handler.processor.ProcessRawLog(raw); err != nil {
+	if err := handler.processor.ProcessLog(ctx, raw); err != nil {
 		//присылаем о ошибке при обработке или сохранении лога
 		return &pb.ResponseRawLog{
 			Response: false,
@@ -71,23 +71,31 @@ func (handler *LogHandler) SendRawLog(ctx context.Context, req *pb.RequestRawLog
 func (handler *LogHandler) SendRawLogStream(stream grpc.ClientStreamingServer[pb.RequestRawLog, pb.ResponseRawLog]) error {
 	var processedCount int32
 	var failedCount int32
+	ctx := stream.Context()
+	const batchSize = 10
+	var batch []*logstructure.RawLog
 
 	for {
-		// Recv() возвращает (*pb.RequestRawLog, error)
 		req, err := stream.Recv()
 		if err == io.EOF {
-			// Создаём ответ и передаём указатель
+			// Обрабатываем остаток батча
+			if len(batch) > 0 {
+				if err := handler.processor.ProcessBatch(ctx, batch); err != nil {
+					failedCount += int32(len(batch))
+				} else {
+					processedCount += int32(len(batch))
+				}
+			}
 			response := &pb.ResponseRawLog{
 				Response: true,
 				Message:  fmt.Sprintf("Processed %d logs successfully, %d failed", processedCount, failedCount),
 			}
-			return stream.SendAndClose(response) // отправка и закрытие
+			return stream.SendAndClose(response)
 		}
 		if err != nil {
 			return fmt.Errorf("error receiving log: %v", err)
 		}
 
-		// req уже является *pb.RequestRawLog, просто используем поля
 		timestamp, err := time.Parse(time.RFC3339, req.Timestamp)
 		if err != nil {
 			failedCount++
@@ -104,12 +112,14 @@ func (handler *LogHandler) SendRawLogStream(stream grpc.ClientStreamingServer[pb
 			Raw_data:        req.Content,
 		}
 
-		err = handler.processor.ProcessRawLog(raw)
-		if err == nil {
-			processedCount++
-		} else {
-			failedCount++
-			fmt.Printf("Failed to process log: %v\n", err)
+		batch = append(batch, raw)
+		if len(batch) >= batchSize {
+			if err := handler.processor.ProcessBatch(ctx, batch); err != nil {
+				failedCount += int32(len(batch))
+			} else {
+				processedCount += int32(len(batch))
+			}
+			batch = nil // очищаем батч
 		}
 	}
 }

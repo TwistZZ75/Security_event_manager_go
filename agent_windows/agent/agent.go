@@ -1,63 +1,66 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"log"
 	"os"
-	"os/signal"
-	"siem-agent/collector"
-	"siem-agent/config"
-	"siem-agent/grpc_ag"
-	"syscall"
+
+	"golang.org/x/sys/windows/svc"
+	"golang.org/x/sys/windows/svc/eventlog"
 )
 
 func main() {
-	//загрузка конфига
-	cfg, err := config.LoadConfig(".")
+	isIntSess, err := svc.IsAnInteractiveSession()
 	if err != nil {
-		fmt.Println("config truble")
+		log.Fatalf("failed to determine if we are running in an interactive session: %v", err)
 	}
 
-	//получение информации о системе и пользователе
-	baseInfo := collector.NewBaseCollectorInfo()
-	cfg.Agent.Hostname = baseInfo.PC_name
-	cfg.Agent.OS = baseInfo.OS
-	fmt.Printf("Config: %v\n", cfg)
+	// Если запущено из командной строки
+	if isIntSess {
+		if len(os.Args) < 2 {
+			fmt.Printf("Usage: %s <install|remove|start|stop>\n", os.Args[0])
+			return
+		}
 
-	//получение адреса и порта из конфига
-	serverAddr := fmt.Sprintf("%s:%s", cfg.Server.Address, cfg.Server.Port)
-	//создание соединения с сервером
-	client, err := grpc_ag.NewLogClient(serverAddr)
+		cmd := os.Args[1]
+		switch cmd {
+		case "install":
+			err = installService()
+			if err != nil {
+				log.Fatalf("Failed to install service: %v", err)
+			}
+			fmt.Println("Service installed successfully")
+		case "remove":
+			err = removeService()
+			if err != nil {
+				log.Fatalf("Failed to remove service: %v", err)
+			}
+			fmt.Println("Service removed successfully")
+		default:
+			fmt.Printf("Unknown command: %s\n", cmd)
+		}
+		return
+	}
+
+	// Запускаем как сервис
+	elog, err := eventlog.Open(serviceName)
 	if err != nil {
-		fmt.Printf("Failed to connect to server %v", err)
+		return
 	}
-	log.Printf("Connecting to server: %s", serverAddr)
-	defer client.Close()
+	defer elog.Close()
 
-	//создание контекста
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	//запуск коллекторов
-	collectors := grpc_ag.StartAllCollectors(ctx, cfg)
-
-	//запуск горутины для сбора логов и их буфферизации для каждого из коллекторов
-	go grpc_ag.BatchLogs(ctx, client, collectors)
-
-	// Обработка Ctrl+C
-	signalChan := make(chan os.Signal, 1)
-	signal.Notify(signalChan, os.Interrupt, syscall.SIGTERM)
-
-	// Ожидаем сигнал Ctrl+C
-	<-signalChan
-
-	//остановка всех коллекторов
-	for _, col := range collectors {
-		col.Stop_collect()
+	agent := &Agent{
+		serverAddr: os.Getenv("SIEM_SERVER_ADDR"),
+		eventChan:  make(chan *AgentCommand, 100),
+		stopChan:   make(chan struct{}),
+		elog:       elog,
 	}
-	fmt.Println("\nПолучен сигнал завершения. Останавливаем сбор логов...")
 
-	//cancel()
+	winService := &WindowsService{agent: agent}
 
+	err = svc.Run(serviceName, winService)
+	if err != nil {
+		elog.Error(1, fmt.Sprintf("Failed to run service: %v", err))
+		return
+	}
 }

@@ -21,3 +21,23 @@ const (
 	ActionStatusSuccess = "success"
 	ActionStatusFailed  = "failed"
 )
+
+type ActionFilter struct {
+	AlertID    int64
+	ActionType string
+	Status     string
+	Target     string
+	Limit      int
+	Offset     int
+}
+
+type ActionStats struct {
+	Total        int64
+	Success      int64
+	Failed       int64
+	Pending      int64
+	BlockAccount int64
+	BlockNetwork int64
+	KillProcess  int64
+	Notify       int64
+}
