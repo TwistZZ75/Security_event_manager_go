@@ -45,6 +45,7 @@ func LoadConfig(path string) (*Config, error) {
 	viper.SetConfigType("yaml")
 	viper.AddConfigPath(path)
 	viper.AddConfigPath(".")
+	viper.AddConfigPath("C:\\Program Files\\SIEM Agent\\")
 
 	viper.AutomaticEnv()
 
@@ -54,6 +55,16 @@ func LoadConfig(path string) (*Config, error) {
 	viper.SetDefault("agent.os", baseInfo.OS)
 	viper.SetDefault("server.address", "localhost")
 	viper.SetDefault("server.port", "5000")
+
+	// Настройки Windows Event Log по умолчанию
+	viper.SetDefault("collectors.winevent.enabled", false)
+	viper.SetDefault("collectors.winevent.channel", "Security")
+	viper.SetDefault("collectors.winevent.eventid", "*")
+
+	// Настройки Sysmon по умолчанию
+	viper.SetDefault("collectors.sysmon.enabled", false)
+	viper.SetDefault("collectors.sysmon.channel", "Microsoft-Windows-Sysmon/Operational")
+	viper.SetDefault("collectors.sysmon.eventid", "*")
 
 	if err := viper.ReadInConfig(); err != nil {
 		return nil, err

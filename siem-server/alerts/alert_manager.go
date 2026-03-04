@@ -60,7 +60,7 @@ func (am *AlertManager) CreateAlert(ctx context.Context, alert *Alert) error {
 }
 
 // GetAlert получает алерт по ID
-func (am *AlertManager) GetAlert(ctx context.Context, id int64) (*Alert, error) {
+func (am *AlertManager) GetAlert(ctx context.Context, id string) (*Alert, error) {
 	return am.storage.GetAlert(ctx, id)
 }
 
@@ -111,9 +111,9 @@ func (am *AlertManager) getNotificationChannels(severity string) []string {
 	case "critical":
 		return []string{"email", "telegram"}
 	case "high":
-		return []string{"email"}
+		return []string{"telegram"}
 	case "medium":
-		return []string{"email"}
+		return []string{"telegram"}
 	default:
 		return []string{}
 	}

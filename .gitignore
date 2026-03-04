@@ -7,3 +7,4 @@
 /agent_old
 /agent_linux/agent/proto/agent_service.proto
 /siem-server/proto/agent_service.proto
+/agent_windows/agent/proto/agent_service.proto

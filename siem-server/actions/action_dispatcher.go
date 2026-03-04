@@ -51,7 +51,9 @@ func NewDispatcher(actionLog ActionLogger, agentComm AgentCommunicator, notifier
 
 	d.RegisterExecutor(NewNotifyExecutor(notifier))
 	d.RegisterExecutor(NewBlockAccountExecutor(agentComm))
+	d.RegisterExecutor(NewUnblockAccountExecutor(agentComm))
 	d.RegisterExecutor(NewBlockNetworkExecutor(agentComm))
+	d.RegisterExecutor(NewUnblockNetworkExecutor(agentComm))
 	d.RegisterExecutor(NewKillProcessExecutor(agentComm))
 
 	return d
@@ -242,6 +244,63 @@ func (bae *BlockAccountExecutor) Execute(ctx context.Context, alert *alerts.Aler
 }
 
 // ============================================================================
+// UNBLOCK ACCOUNT EXECUTOR
+// ============================================================================
+
+type UnblockAccountExecutor struct {
+	agentComm AgentCommunicator
+}
+
+func NewUnblockAccountExecutor(agentComm AgentCommunicator) *UnblockAccountExecutor {
+	return &UnblockAccountExecutor{agentComm: agentComm}
+}
+
+func (uae *UnblockAccountExecutor) GetType() string {
+	return rules.ActionUnblockAccount
+}
+
+func (uae *UnblockAccountExecutor) Execute(ctx context.Context, alert *alerts.Alert, params map[string]interface{}) error {
+	// Получаем username из параметров или из alert
+	username := ""
+	if u, ok := params["username"]; ok {
+		username = fmt.Sprintf("%v", u)
+	} else {
+		username = getStringFromEventData(alert.EventData, "username")
+	}
+
+	// Получаем host из параметров или из alert
+	host := ""
+	if h, ok := params["host"]; ok {
+		host = fmt.Sprintf("%v", h)
+	} else {
+		host = getStringFromEventData(alert.EventData, "pc_name")
+	}
+
+	if username == "unknown" || username == "" {
+		return fmt.Errorf("username not specified")
+	}
+
+	if host == "unknown" || host == "" {
+		return fmt.Errorf("host not specified")
+	}
+
+	command := AgentCommand{
+		Type: "unblock_account",
+		Parameters: map[string]interface{}{
+			"username": username,
+		},
+		AlertID: alert.ID,
+	}
+
+	if err := uae.agentComm.SendCommand(ctx, host, command); err != nil {
+		return fmt.Errorf("failed to send unblock account command: %v", err)
+	}
+
+	log.Printf("✓ Unblock account command sent for user %s on host %s", username, host)
+	return nil
+}
+
+// ============================================================================
 // BLOCK NETWORK EXECUTOR
 // ============================================================================
 
@@ -282,6 +341,49 @@ func (bne *BlockNetworkExecutor) Execute(ctx context.Context, alert *alerts.Aler
 	}
 
 	log.Printf("Block network command sent to host %s", host)
+	return nil
+}
+
+// ============================================================================
+// UNBLOCK NETWORK EXECUTOR
+// ============================================================================
+
+type UnblockNetworkExecutor struct {
+	agentComm AgentCommunicator
+}
+
+func NewUnblockNetworkExecutor(agentComm AgentCommunicator) *UnblockNetworkExecutor {
+	return &UnblockNetworkExecutor{agentComm: agentComm}
+}
+
+func (une *UnblockNetworkExecutor) GetType() string {
+	return rules.ActionUnblockNetwork
+}
+
+func (une *UnblockNetworkExecutor) Execute(ctx context.Context, alert *alerts.Alert, params map[string]interface{}) error {
+	// Получаем host из параметров или из alert
+	host := ""
+	if h, ok := params["host"]; ok {
+		host = fmt.Sprintf("%v", h)
+	} else {
+		host = getStringFromEventData(alert.EventData, "pc_name")
+	}
+
+	if host == "unknown" || host == "" {
+		return fmt.Errorf("host not specified")
+	}
+
+	command := AgentCommand{
+		Type:       "unblock_network",
+		Parameters: map[string]interface{}{},
+		AlertID:    alert.ID,
+	}
+
+	if err := une.agentComm.SendCommand(ctx, host, command); err != nil {
+		return fmt.Errorf("failed to send unblock network command: %v", err)
+	}
+
+	log.Printf("✓ Unblock network command sent to host %s", host)
 	return nil
 }
 

@@ -252,3 +252,242 @@ func (as *AgentStorage) ScanAgent(scanner interface {
 		LastHeartbeat: lastHeartbeat,
 	}, nil
 }
+
+// UpsertAgent создает или обновляет агента
+func (as *AgentStorage) UpsertAgent(ctx context.Context, agent *AgentInfo) error {
+	metadataJSON, err := json.Marshal(agent.Metadata)
+	if err != nil {
+		return fmt.Errorf("failed to marshal metadata: %v", err)
+	}
+
+	query := `
+		INSERT INTO agents (
+			agent_id, hostname, ip_address, os, os_version, 
+			agent_version, status, last_seen, metadata, registered_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+		ON CONFLICT (hostname) DO UPDATE SET
+			agent_id = EXCLUDED.agent_id,
+			ip_address = EXCLUDED.ip_address,
+			os = EXCLUDED.os,
+			os_version = EXCLUDED.os_version,
+			agent_version = EXCLUDED.agent_version,
+			status = EXCLUDED.status,
+			last_seen = EXCLUDED.last_seen,
+			metadata = EXCLUDED.metadata
+	`
+
+	_, err = as.pool.Exec(ctx, query,
+		agent.AgentID,
+		agent.Hostname,
+		agent.IPAddress,
+		agent.OS,
+		agent.OSVersion,
+		agent.AgentVersion,
+		agent.Status,
+		agent.LastSeen,
+		metadataJSON,
+	)
+
+	if err != nil {
+		return fmt.Errorf("failed to upsert agent: %v", err)
+	}
+
+	return nil
+}
+
+// UpdateAgentLastSeen обновляет время последней активности агента
+func (as *AgentStorage) UpdateAgentLastSeen(ctx context.Context, hostname string) error {
+	query := `
+		UPDATE agents
+		SET last_seen = NOW(),
+		    status = 'online'
+		WHERE hostname = $1
+	`
+
+	_, err := as.pool.Exec(ctx, query, hostname)
+	if err != nil {
+		return fmt.Errorf("failed to update last_seen: %v", err)
+	}
+
+	return nil
+}
+
+// GetAgentByHostname получает агента по hostname
+func (as *AgentStorage) GetAgentByHostname(ctx context.Context, hostname string) (*AgentInfo, error) {
+	query := `
+		SELECT 
+			id, agent_id, hostname, ip_address, os, os_version,
+			agent_version, status, last_seen, registered_at, metadata
+		FROM agents
+		WHERE hostname = $1
+	`
+
+	var agent AgentInfo
+	var metadataJSON []byte
+
+	err := as.pool.QueryRow(ctx, query, hostname).Scan(
+		&agent.ID,
+		&agent.AgentID,
+		&agent.Hostname,
+		&agent.IPAddress,
+		&agent.OS,
+		&agent.OSVersion,
+		&agent.AgentVersion,
+		&agent.Status,
+		&agent.LastSeen,
+		&agent.RegisteredAt,
+		&metadataJSON,
+	)
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to get agent: %v", err)
+	}
+
+	// Десериализуем metadata
+	if len(metadataJSON) > 0 {
+		if err := json.Unmarshal(metadataJSON, &agent.Metadata); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal metadata: %v", err)
+		}
+	}
+
+	return &agent, nil
+}
+
+// GetPendingCommandsForHost получает pending команды для хоста
+func (cq *CommandQueue) GetPendingCommandsForHost(ctx context.Context, hostname string) ([]*AgentCommand, error) {
+	query := `
+		SELECT 
+			id, hostname, command_type, parameters, alert_id, 
+			priority, status, created_at
+		FROM agent_commands
+		WHERE hostname = $1 
+		  AND status = 'pending'
+		ORDER BY priority DESC, created_at ASC
+		LIMIT 10
+	`
+
+	rows, err := cq.pool.Query(ctx, query, hostname)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query pending commands: %v", err)
+	}
+	defer rows.Close()
+
+	var commands []*AgentCommand
+
+	for rows.Next() {
+		var cmd AgentCommand
+		var parametersJSON []byte
+
+		err := rows.Scan(
+			&cmd.ID,
+			&cmd.Hostname,
+			&cmd.CommandType,
+			&parametersJSON,
+			&cmd.AlertID,
+			&cmd.Priority,
+			&cmd.Status,
+			&cmd.CreatedAt,
+		)
+
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan command: %v", err)
+		}
+
+		// Десериализуем parameters
+		if len(parametersJSON) > 0 {
+			var params map[string]interface{}
+			if err := json.Unmarshal(parametersJSON, &params); err != nil {
+				return nil, fmt.Errorf("failed to unmarshal parameters: %v", err)
+			}
+
+			// Конвертируем в map[string]string
+			cmd.Parameters = make(map[string]string)
+			for k, v := range params {
+				cmd.Parameters[k] = fmt.Sprintf("%v", v)
+			}
+		}
+
+		commands = append(commands, &cmd)
+	}
+
+	// После получения команд, обновляем их статус на "sent"
+	if len(commands) > 0 {
+		ids := make([]int64, len(commands))
+		for i, cmd := range commands {
+			ids[i] = cmd.ID
+		}
+
+		updateQuery := `
+			UPDATE agent_commands
+			SET status = 'sent',
+			    updated_at = NOW()
+			WHERE id = ANY($1)
+		`
+		_, err = cq.pool.Exec(ctx, updateQuery, ids)
+		if err != nil {
+			// Не критично, логируем и продолжаем
+			fmt.Printf("Warning: failed to update command status to 'sent': %v\n", err)
+		}
+	}
+
+	return commands, nil
+}
+
+// UpdateCommandStatus обновляет статус выполнения команды
+func (cq *CommandQueue) UpdateCommandStatus(ctx context.Context, commandID int64, status, result, errorMsg string) error {
+	query := `
+		UPDATE agent_commands
+		SET status = $1,
+		    result = $2,
+		    error = $3,
+		    executed_at = NOW(),
+		    updated_at = NOW()
+		WHERE id = $4
+	`
+
+	_, err := cq.pool.Exec(ctx, query, status, result, errorMsg, commandID)
+	if err != nil {
+		return fmt.Errorf("failed to update command status: %v", err)
+	}
+
+	return nil
+}
+
+// MarkOfflineAgents помечает агентов как offline если они не отправляли heartbeat > 5 минут
+func (as *AgentStorage) MarkOfflineAgents(ctx context.Context) error {
+	query := `
+		UPDATE agents
+		SET status = 'offline'
+		WHERE status = 'online'
+		  AND last_seen < NOW() - INTERVAL '5 minutes'
+	`
+
+	result, err := as.pool.Exec(ctx, query)
+	if err != nil {
+		return fmt.Errorf("failed to mark offline agents: %v", err)
+	}
+
+	rowsAffected := result.RowsAffected()
+	if rowsAffected > 0 {
+		fmt.Printf("Marked %d agents as offline\n", rowsAffected)
+	}
+
+	return nil
+}
+
+// StartOfflineChecker запускает периодическую проверку offline агентов
+func (as *AgentStorage) StartOfflineChecker(ctx context.Context) {
+	ticker := time.NewTicker(1 * time.Minute)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			if err := as.MarkOfflineAgents(ctx); err != nil {
+				fmt.Printf("Error marking offline agents: %v\n", err)
+			}
+		case <-ctx.Done():
+			return
+		}
+	}
+}

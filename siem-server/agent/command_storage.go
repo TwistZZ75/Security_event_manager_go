@@ -118,24 +118,24 @@ func (cq *CommandQueue) GetPendingCommands(ctx context.Context, hostname string)
 	return commands, nil
 }
 
-// обновляет статус команды
-func (cq *CommandQueue) UpdateCommandStatus(ctx context.Context, commandID int64, status, result, errorMsg string) error {
-	query := `
-		UPDATE agent_commands
-		SET status = $1,
-		    result = $2,
-		    error = $3,
-		    completed_at = $4
-		WHERE id = $5
-	`
+// // обновляет статус команды
+// func (cq *CommandQueue) UpdateCommandStatus(ctx context.Context, commandID int64, status, result, errorMsg string) error {
+// 	query := `
+// 		UPDATE agent_commands
+// 		SET status = $1,
+// 		    result = $2,
+// 		    error = $3,
+// 		    completed_at = $4
+// 		WHERE id = $5
+// 	`
 
-	_, err := cq.pool.Exec(ctx, query, status, result, errorMsg, time.Now(), commandID)
-	if err != nil {
-		return fmt.Errorf("failed to update command status: %v", err)
-	}
+// 	_, err := cq.pool.Exec(ctx, query, status, result, errorMsg, time.Now(), commandID)
+// 	if err != nil {
+// 		return fmt.Errorf("failed to update command status: %v", err)
+// 	}
 
-	return nil
-}
+// 	return nil
+// }
 
 // получает команду по ID
 func (cq *CommandQueue) GetCommand(ctx context.Context, commandID int64) (*AgentCommand, error) {

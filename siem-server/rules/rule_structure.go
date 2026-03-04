@@ -77,7 +77,9 @@ const (
 const (
 	ActionNotify         = "notify"
 	ActionBlockAccount   = "block_account"
+	ActionUnblockAccount = "unblock_account"
 	ActionBlockNetwork   = "block_network"
+	ActionUnblockNetwork = "unblock_network"
 	ActionIsolateHost    = "isolate_host"
 	ActionKillProcess    = "kill_process"
 	ActionQuarantineFile = "quarantine_file"

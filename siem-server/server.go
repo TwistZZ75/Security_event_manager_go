@@ -16,6 +16,7 @@ import (
 	"siem-server/proto/server/pkg/pb"
 	"siem-server/rules"
 	"siem-server/state"
+	webserver "siem-server/web_server"
 	"syscall"
 	"time"
 
@@ -57,7 +58,7 @@ func main() {
 	actionStorage := actions.NewActionStorage(pool)
 	stateStorage := state.NewStateStorage(pool)
 	commandQueue := agent.NewCommandQueue(pool)
-	//agentStorage := agent.NewAgentStorage(pool)
+	agentStorage := agent.NewAgentStorage(pool)
 
 	notifier := actions.NewMultiNotifier()
 	agentComm := actions.NewGRPCAgentComm(commandQueue)
@@ -103,6 +104,22 @@ func main() {
 	log.Println("Initializing handlers...")
 
 	logHandler := delivery.NewLogHandler(logProc)
+
+	webServer := webserver.NewWebServer(
+		agentStorage,
+		alertStorage,
+		actionStorage,
+		ruleStorage,
+	)
+
+	// Запускаем веб-сервер в отдельной горутине
+	go func() {
+		if err := webServer.Start(":8080"); err != nil {
+			log.Fatalf("Web server failed: %v", err)
+		}
+	}()
+
+	log.Println("✓ Web interface available at http://localhost:8080")
 	// TODO: Добавить другие handlers когда будут готовы
 	// ruleHandler := delivery.NewRuleHandler(ruleStorage, alertStorage)
 	// agentHandler := delivery.NewAgentHandler(agentStorage, commandQueue)

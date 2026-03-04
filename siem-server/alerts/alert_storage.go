@@ -57,7 +57,7 @@ func (ast *AlertStorage) CreateAlert(ctx context.Context, alert *Alert) error {
 	return nil
 }
 
-func (ast *AlertStorage) GetAlert(ctx context.Context, id int64) (*Alert, error) {
+func (ast *AlertStorage) GetAlert(ctx context.Context, id string) (*Alert, error) {
 	query := `
 		SELECT 
 			id,
@@ -82,7 +82,7 @@ func (ast *AlertStorage) GetAlert(ctx context.Context, id int64) (*Alert, error)
 	alert, err := ast.ScanAlert(row)
 	if err != nil {
 		if err == pgx.ErrNoRows {
-			return nil, fmt.Errorf("alert not found: %d", id)
+			return nil, fmt.Errorf("alert not found: %v", id)
 		}
 		return nil, fmt.Errorf("failed to get alert: %v", err)
 	}

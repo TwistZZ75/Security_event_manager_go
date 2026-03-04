@@ -7,25 +7,37 @@ server:
   port: "5000"
 
 collectors:
+  # Windows Event Log (Журнал безопасности)
   winevent:
     enabled: true
     channel: "Security"
-    eventid: "* [System[(EventID=5158)]]" # * - все события из журнала
-    # *[System[(EventID=5156)]] - события с eventID = 5156
+    eventid: "*"  # * = все события, можно указать конкретный ID
+    # Примеры:
+    # "*[System[(EventID=4624)]]" - только событие 4624 (успешный вход)
+    # "*[System[(EventID=4625)]]" - только событие 4625 (неудачный вход)
+    # "*" - все события из канала Security
   
+  # Sysmon (требует установки Sysmon)
   sysmon:
     enabled: true
     channel: "Microsoft-Windows-Sysmon/Operational"
-    eventid: "*" # * - все события из журнала
-  
-  suricata:
-    enabled: true
-    log_path: "/var/log/suricata/eve.json"
-  
-  squid:
-    enabled: false
-    log_path: "/var/log/squid/access.log"
-  
-  syslog:
-    enabled: false
-    log_path: "/var/log/syslog"
+    eventid: "*"  # * = все события
+    # Примеры:
+    # "*[System[(EventID=1)]]"  - Process Creation
+    # "*[System[(EventID=3)]]"  - Network Connection
+    # "*[System[(EventID=11)]]" - File Created
+
+# ============================================================================
+# ПРИМЕЧАНИЯ
+# ============================================================================
+# 
+# 1. Для работы сборщика Sysmon необходимо установить Sysmon:
+#    https://docs.microsoft.com/en-us/sysinternals/downloads/sysmon
+#    
+# 2. Агент должен запускаться с правами Администратора
+#    
+# 3. Адрес сервера должен быть доступен по сети
+#    
+# 4. Указанный порт должен быть открыт на SIEM сервере
+# 
+# ============================================================================

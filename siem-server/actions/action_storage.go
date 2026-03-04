@@ -152,7 +152,7 @@ func (as *ActionStorage) ScanActionLog(scanner interface {
 }
 
 // GetActionLog получает лог действия по ID
-func (as *ActionStorage) GetActionLog(ctx context.Context, id int64) (*ActionLog, error) {
+func (as *ActionStorage) GetActionLog(ctx context.Context, id string) (*ActionLog, error) {
 	query := `
 		SELECT 
 			id,
@@ -385,4 +385,11 @@ func (as *ActionStorage) DeleteOldActions(ctx context.Context, olderThan time.Du
 	}
 
 	return result.RowsAffected(), nil
+}
+
+func (acst *ActionStorage) GetRecentActions(ctx context.Context, limit int) ([]*ActionLog, error) {
+	filter := ActionFilter{
+		Limit: limit,
+	}
+	return acst.ListActions(ctx, filter)
 }
