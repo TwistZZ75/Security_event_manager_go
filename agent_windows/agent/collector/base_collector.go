@@ -3,9 +3,10 @@ package collector
 import (
 	"context"
 	"os"
-	"os/user"
+	"os/exec"
 	"runtime"
 	"siem-agent/proto/pkg/pb"
+	"strings"
 )
 
 type LogCollector interface {
@@ -29,11 +30,16 @@ func NewBaseCollectorInfo() *BaseLogCollectorInfo {
 }
 
 func defineUsername() string {
-	user, err := user.Current()
-	if err != nil {
-		return "Guest"
+	cmd := exec.Command("powershell", "-Command",
+		`(Get-WmiObject -Class Win32_ComputerSystem).UserName.Split('\')[1]`)
+	output, err := cmd.Output()
+	if err == nil {
+		username := strings.TrimSpace(string(output))
+		if username != "" {
+			return username
+		}
 	}
-	return user.Username
+	return "NoUserLoggedIn"
 }
 
 func definePCname() string {

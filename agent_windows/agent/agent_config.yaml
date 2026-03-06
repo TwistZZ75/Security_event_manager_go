@@ -1,10 +1,11 @@
 agent:
   hostname: ""  
-  os: ""        
+  os: ""       
+  interface: ""
 
 server:
-  address: "localhost"
-  port: "5000"
+  address: "localhost" # укажиет ip адрес целевого сервера
+  port: "5000" # укажите порт который прослушивает сервер
 
 collectors:
   # Windows Event Log (Журнал безопасности)

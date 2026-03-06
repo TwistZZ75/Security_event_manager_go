@@ -84,7 +84,7 @@ func (a *Agent) executeCommand(cmd *AgentCommand) (string, error) {
 	case "block_network":
 		return a.blockNetwork()
 	case "unblock_network":
-		return a.unblockNetwork(cmd.Parameters)
+		return a.unblockNetwork()
 	case "kill_process":
 		return a.killProcess(cmd.Parameters)
 	case "quarantine_file":
@@ -203,7 +203,7 @@ func (a *Agent) blockNetwork() (string, error) {
 }
 
 // unblockNetwork разблокирует сетевой доступ
-func (a *Agent) unblockNetwork(params map[string]string) (string, error) {
+func (a *Agent) unblockNetwork() (string, error) {
 	// Удаляем правила блокировки
 	cmd1 := exec.Command("netsh", "advfirewall", "firewall", "delete", "rule", "name=SIEM_BLOCK_ALL_OUT")
 	cmd1.CombinedOutput()
@@ -275,7 +275,7 @@ func (a *Agent) quarantineFile(params map[string]string) (string, error) {
 	return fmt.Sprintf("File quarantined: %s → %s", filePath, destPath), nil
 }
 
-// contains проверяет содержит ли строка подстроку (case-insensitive)
+// contains проверяет содержит ли строка подстроку
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) &&
 		(s == substr || len(s) > len(substr) &&

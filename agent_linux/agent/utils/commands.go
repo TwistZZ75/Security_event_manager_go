@@ -69,7 +69,7 @@ func (a *Agent) executeCommand(cmd *AgentCommand) error {
 	case "block_account":
 		return a.blockAccount(cmd.Parameters)
 	case "block_network":
-		return a.blockNetwork(cmd.Parameters)
+		return a.blockNetwork()
 	case "kill_process":
 		return a.killProcess(cmd.Parameters)
 	case "quarantine_file":
@@ -110,7 +110,7 @@ func (a *Agent) unblockAccount(username string) error {
 }
 
 // blockNetwork блокирует сетевой доступ
-func (a *Agent) blockNetwork(params map[string]string) error {
+func (a *Agent) blockNetwork() error {
 	// Создаем iptables правило, блокирующее весь исходящий трафик
 	rules := [][]string{
 		{"iptables", "-I", "OUTPUT", "1", "-j", "DROP"},

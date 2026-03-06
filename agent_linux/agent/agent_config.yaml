@@ -1,6 +1,7 @@
 agent:
   hostname: ""  
-  os: ""        
+  os: ""    
+  interface: "enp0s3"    
 
 server:
   address: "localhost"

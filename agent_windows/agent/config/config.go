@@ -13,8 +13,9 @@ type Config struct {
 }
 
 type AgentConfig struct {
-	Hostname string `mapstructure:"hostname"`
-	OS       string `mapstructure:"os"`
+	Hostname  string `mapstructure:"hostname"`
+	OS        string `mapstructure:"os"`
+	Interface string `mapstructure:"interface"`
 }
 
 type ServerConfig struct {

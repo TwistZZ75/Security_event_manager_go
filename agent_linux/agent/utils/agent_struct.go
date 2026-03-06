@@ -1,6 +1,12 @@
 package utils
 
-import "siem-agent/proto/pkg/pb"
+import (
+	"siem-agent/config"
+	"siem-agent/proto/pkg/pb"
+	"time"
+
+	"google.golang.org/grpc"
+)
 
 const (
 	serviceName = "siem-agent"
@@ -9,11 +15,14 @@ const (
 
 // Agent представляет агент SIEM для Linux
 type Agent struct {
-	serverAddr string
-	hostname   string
-	grpcClient pb.AgentServiceClient
-	eventChan  chan *AgentCommand
-	stopChan   chan struct{}
+	serverAddr   string
+	hostname     string
+	cfg          *config.Config
+	grpcClient   pb.AgentServiceClient
+	grpcConn     *grpc.ClientConn
+	eventChan    chan *AgentCommand
+	stopChan     chan struct{}
+	pollInterval time.Duration
 }
 
 // AgentCommand команда от сервера

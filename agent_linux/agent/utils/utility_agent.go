@@ -11,20 +11,18 @@ import (
 	"siem-agent/proto/pkg/pb"
 	"time"
 
-	"golang.org/x/sys/windows/svc/eventlog"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
 
-// NewAgent создает нового агента
-func NewAgent(serverAddr string, cfg *config.Config, elog *eventlog.Log) *Agent {
+// NewAgent создает нового агента для Linux
+func NewAgent(serverAddr string, cfg *config.Config) *Agent {
 	return &Agent{
 		serverAddr:   serverAddr,
 		cfg:          cfg,
 		eventChan:    make(chan *AgentCommand, 100),
 		stopChan:     make(chan struct{}),
-		elog:         elog,
-		pollInterval: 10 * time.Second, // Опрос каждые 10 секунд
+		pollInterval: 10 * time.Second,
 	}
 }
 
@@ -80,19 +78,13 @@ func (a *Agent) Stop() {
 func (a *Agent) registerAgent() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	// Получаем имя хоста
-	hostname, err := os.Hostname()
-	if err != nil {
-		return fmt.Errorf("failed to get hostname: %v", err)
-	}
-	a.hostname = hostname
 
 	baseInfo := a.cfg.Agent
 
 	req := &pb.RegisterAgentRequest{
 		Hostname:     a.hostname,
 		Os:           baseInfo.OS,
-		OsVersion:    getOSVersion(), // Можно получить динамически
+		OsVersion:    getOSVersion(),
 		AgentVersion: "1.0.0",
 		IpAddress:    getLocalIP(),
 		Metadata: map[string]string{
@@ -109,7 +101,7 @@ func (a *Agent) registerAgent() error {
 		return fmt.Errorf("registration failed: %s", resp.Message)
 	}
 
-	// Обновляем интервал polling если сервер его указал
+	// Обновляем интервал polling, если сервер его указал
 	if resp.PollingInterval > 0 {
 		a.pollInterval = time.Duration(resp.PollingInterval) * time.Second
 		a.logInfo("Polling interval set to %d seconds", resp.PollingInterval)
@@ -120,72 +112,54 @@ func (a *Agent) registerAgent() error {
 
 // logInfo записывает информационное сообщение
 func (a *Agent) logInfo(format string, v ...interface{}) {
-	msg := fmt.Sprintf(format, v...)
-	if a.elog != nil {
-		a.elog.Info(1, msg)
-	} else {
-		log.Println("[INFO]", msg)
-	}
+	log.Printf("[INFO] "+format, v...)
 }
 
 // logWarning записывает предупреждение
 func (a *Agent) logWarning(format string, v ...interface{}) {
-	msg := fmt.Sprintf(format, v...)
-	if a.elog != nil {
-		a.elog.Warning(2, msg)
-	} else {
-		log.Println("[WARNING]", msg)
-	}
+	log.Printf("[WARNING] "+format, v...)
 }
 
 // logError записывает ошибку
 func (a *Agent) logError(format string, v ...interface{}) {
-	msg := fmt.Sprintf(format, v...)
-	if a.elog != nil {
-		a.elog.Error(3, msg)
-	} else {
-		log.Println("[ERROR]", msg)
-	}
+	log.Printf("[ERROR] "+format, v...)
 }
 
-// getLocalIP получает локальный IP адрес
+// getLocalIP получает локальный IP адрес (упрощённо)
 func getLocalIP() string {
-	// Перечисляем все сетевые интерфейсы
-	interfaces, err := net.Interfaces()
+	cfg := &config.Config{}
+	agent_interface := cfg.Agent.Interface
+	//получаем структуру inteface по имени интерфейса из конфига
+	iface, err := net.InterfaceByName(agent_interface)
 	if err != nil {
-		return "Check net interfaces"
+		return "Unknown interface"
 	}
 
-	for _, iface := range interfaces {
-		// Пропускаем отключённые и loopback
-		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
-			continue
-		}
+	// получаем все принадлежащие интерфейсу ip
+	addrs, err := iface.Addrs()
+	if err != nil {
+		return "No ip"
+	}
 
-		// Получаем адреса интерфейса
-		addrs, err := iface.Addrs()
-		if err != nil {
-			continue
-		}
-
-		for _, addr := range addrs {
-			if ipNet, ok := addr.(*net.IPNet); ok && ipNet.IP != nil {
-				if ipNet.IP.To4() != nil && !ipNet.IP.IsLoopback() {
-					return ipNet.IP.String()
-				}
-			}
+	// ищем нужный IPv4
+	for _, addr := range addrs {
+		if ipNet, ok := addr.(*net.IPNet); ok && ipNet.IP.To4() != nil {
+			return ipNet.IP.String()
 		}
 	}
-	return "0.0.0.0"
+	return ""
 }
 
-// getUsername получает имя текущего пользователя
+// getUsername получает имя текущего пользователя в Linux
 func getUsername() string {
-	username := os.Getenv("USERNAME")
-	if username == "" {
-		return "SYSTEM"
+	user := os.Getenv("USER")
+	if user == "" {
+		user = os.Getenv("LOGNAME")
 	}
-	return username
+	if user == "" {
+		return "unknown"
+	}
+	return user
 }
 
 // getOSVersion возвращает версию ОС

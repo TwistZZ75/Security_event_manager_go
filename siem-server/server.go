@@ -48,7 +48,7 @@ func main() {
 	if err := pool.Ping(ctx); err != nil {
 		log.Fatalf("Failed to ping database: %v", err)
 	}
-	log.Println("✓ Connected to PostgreSQL")
+	log.Println("Connected to PostgreSQL")
 
 	log.Println("Initializing storage layers...")
 
@@ -66,7 +66,7 @@ func main() {
 	alertMgr := alerts.NewAlertManager(alertStorage, notifier)
 	actionDsp := actions.NewDispatcher(actionStorage, agentComm, notifier)
 
-	log.Println("✓ Storage layers initialized")
+	log.Println("Storage layers initialized")
 
 	log.Println("Initializing Rule Engine...")
 
@@ -84,7 +84,7 @@ func main() {
 
 	// Выводим информацию о загруженных правилах
 	rulesCount, _ := ruleStorage.GetEnabledRulesCount(ctx)
-	log.Printf("✓ Rule Engine initialized with %d enabled rules", rulesCount)
+	log.Printf("Rule Engine initialized with %d enabled rules", rulesCount)
 
 	// ============================================================================
 	// PROCESSORS
@@ -96,7 +96,7 @@ func main() {
 	// ВАЖНО: Передаем ruleEngine в LogProc!
 	logProc := processor.NewLogProc(logParser, logStorage, ruleEngine)
 
-	log.Println("✓ Processors initialized")
+	log.Println("Processors initialized")
 
 	// ============================================================================
 	// HANDLERS
@@ -119,12 +119,13 @@ func main() {
 		}
 	}()
 
-	log.Println("✓ Web interface available at http://localhost:8080")
+	log.Println("Web interface available at http://localhost:8080")
+
 	// TODO: Добавить другие handlers когда будут готовы
 	// ruleHandler := delivery.NewRuleHandler(ruleStorage, alertStorage)
-	// agentHandler := delivery.NewAgentHandler(agentStorage, commandQueue)
+	agentHandler := agent.NewAgentServiceHandler(agentStorage, commandQueue)
 
-	log.Println("✓ Handlers initialized")
+	log.Println("Handlers initialized")
 
 	// ============================================================================
 	// BACKGROUND TASKS
@@ -158,7 +159,7 @@ func main() {
 		}
 	}()
 
-	log.Println("✓ Background tasks started")
+	log.Println("Background tasks started")
 
 	// ============================================================================
 	// gRPC SERVER
@@ -178,10 +179,11 @@ func main() {
 
 	// Регистрируем сервисы
 	pb.RegisterLogServiceServer(grpcServ, logHandler)
+	pb.RegisterAgentServiceServer(grpcServ, agentHandler)
 
 	reflection.Register(grpcServ)
 
-	log.Printf("✓ Server is ready on %s", portStr)
+	log.Printf("Server is ready on %s", portStr)
 	log.Println("Press Ctrl+C to stop")
 
 	// Graceful shutdown
@@ -192,7 +194,7 @@ func main() {
 
 		log.Println("Shutting down server...")
 		grpcServ.GracefulStop()
-		log.Println("✓ Server stopped")
+		log.Println("Server stopped")
 	}()
 
 	// Запускаем сервер

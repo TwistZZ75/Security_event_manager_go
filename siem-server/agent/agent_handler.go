@@ -58,19 +58,6 @@ func (h *AgentServiceHandler) RegisterAgent(ctx context.Context, req *agentpb.Re
 	}, nil
 }
 
-// Heartbeat обрабатывает heartbeat от агента
-func (h *AgentServiceHandler) Heartbeat(ctx context.Context, req *agentpb.HeartbeatRequest) (*agentpb.HeartbeatResponse, error) {
-	// Обновляем last_seen время
-	if err := h.agentStorage.UpdateAgentLastSeen(ctx, req.Hostname); err != nil {
-		log.Printf("Failed to update last_seen for %s: %v", req.Hostname, err)
-	}
-
-	return &agentpb.HeartbeatResponse{
-		Success:               true,
-		NextHeartbeatInterval: 60, // 60 секунд
-	}, nil
-}
-
 // GetPendingCommands возвращает ожидающие команды для агента
 func (h *AgentServiceHandler) GetPendingCommands(ctx context.Context, req *agentpb.GetPendingCommandsRequest) (*agentpb.GetPendingCommandsResponse, error) {
 	// Обновляем last_seen

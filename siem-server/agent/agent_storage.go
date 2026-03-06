@@ -97,7 +97,7 @@ func (as *AgentStorage) GetAgent(ctx context.Context, hostname string) (*AgentIn
 		SELECT 
 			id, agent_id, hostname, os, os_version, agent_version,
 			ip_address, metadata, status, registered_at,
-			last_seen, last_heartbeat
+			last_seen
 		FROM agents
 		WHERE hostname = $1
 	`
@@ -120,7 +120,7 @@ func (as *AgentStorage) ListAgents(ctx context.Context) ([]*AgentInfo, error) {
 		SELECT 
 			id, agent_id, hostname, os, os_version, agent_version,
 			ip_address, metadata, status, registered_at,
-			last_seen, last_heartbeat
+			last_seen
 		FROM agents
 		ORDER BY last_seen DESC
 	`
@@ -149,10 +149,10 @@ func (as *AgentStorage) GetOnlineAgents(ctx context.Context) ([]*AgentInfo, erro
 		SELECT 
 			id, agent_id, hostname, os, os_version, agent_version,
 			ip_address, metadata, status, registered_at,
-			last_seen, last_heartbeat
+			last_seen
 		FROM agents
 		WHERE status = 'online'
-		  AND last_heartbeat > $1
+		  AND last_seen > $1
 		ORDER BY last_seen DESC
 	`
 
@@ -175,55 +175,28 @@ func (as *AgentStorage) GetOnlineAgents(ctx context.Context) ([]*AgentInfo, erro
 	return agents, nil
 }
 
-// записывает heartbeat от агента
-func (as *AgentStorage) RecordHeartbeat(ctx context.Context, hostname, agentVersion, status string, metrics map[string]string) error {
-	// Записываем heartbeat
-	metricsJSON, err := json.Marshal(metrics)
-	if err != nil {
-		return fmt.Errorf("failed to marshal metrics: %v", err)
-	}
-
-	query := `
-		INSERT INTO agent_heartbeats (
-			hostname,
-			agent_version,
-			status,
-			metrics,
-			received_at
-		) VALUES ($1, $2, $3, $4, $5)
-	`
-
-	_, err = as.pool.Exec(ctx, query, hostname, agentVersion, status, metricsJSON, time.Now())
-	if err != nil {
-		return fmt.Errorf("failed to record heartbeat: %v", err)
-	}
-
-	return nil
-}
-
 // сканирует строку из БД в структуру AgentInfo
 func (as *AgentStorage) ScanAgent(scanner interface {
 	Scan(dest ...interface{}) error
 }) (*AgentInfo, error) {
 	var (
-		id            int64
-		agentID       string
-		hostname      string
-		os            string
-		osVersion     string
-		agentVersion  string
-		ipAddress     string
-		metadataJSON  []byte
-		status        string
-		registeredAt  time.Time
-		lastSeen      time.Time
-		lastHeartbeat *time.Time
+		id           int64
+		agentID      string
+		hostname     string
+		os           string
+		osVersion    string
+		agentVersion string
+		ipAddress    string
+		metadataJSON []byte
+		status       string
+		registeredAt time.Time
+		lastSeen     time.Time
 	)
 
 	err := scanner.Scan(
 		&id, &agentID, &hostname, &os, &osVersion, &agentVersion,
 		&ipAddress, &metadataJSON, &status, &registeredAt,
-		&lastSeen, &lastHeartbeat,
+		&lastSeen,
 	)
 
 	if err != nil {
@@ -238,18 +211,17 @@ func (as *AgentStorage) ScanAgent(scanner interface {
 	}
 
 	return &AgentInfo{
-		ID:            id,
-		AgentID:       agentID,
-		Hostname:      hostname,
-		OS:            os,
-		OSVersion:     osVersion,
-		AgentVersion:  agentVersion,
-		IPAddress:     ipAddress,
-		Metadata:      metadata,
-		Status:        status,
-		RegisteredAt:  registeredAt,
-		LastSeen:      lastSeen,
-		LastHeartbeat: lastHeartbeat,
+		ID:           id,
+		AgentID:      agentID,
+		Hostname:     hostname,
+		OS:           os,
+		OSVersion:    osVersion,
+		AgentVersion: agentVersion,
+		IPAddress:    ipAddress,
+		Metadata:     metadata,
+		Status:       status,
+		RegisteredAt: registeredAt,
+		LastSeen:     lastSeen,
 	}, nil
 }
 
@@ -453,7 +425,7 @@ func (cq *CommandQueue) UpdateCommandStatus(ctx context.Context, commandID int64
 	return nil
 }
 
-// MarkOfflineAgents помечает агентов как offline если они не отправляли heartbeat > 5 минут
+// MarkOfflineAgents помечает агентов как offline если last_seen > 5 минут
 func (as *AgentStorage) MarkOfflineAgents(ctx context.Context) error {
 	query := `
 		UPDATE agents

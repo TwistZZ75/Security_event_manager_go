@@ -4,14 +4,19 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"siem-agent/config"
 )
 
-// installSystemdService создает systemd unit файл
-func installSystemdService() error {
+type AgService struct {
+}
+
+// InstallSystemdService создает systemd unit файл
+func (as *AgService) InstallSystemdService(cfg *config.Config) error {
 	exepath, err := os.Executable()
 	if err != nil {
 		return err
 	}
+	servAddr := cfg.Server.Address
 
 	serviceContent := fmt.Sprintf(`[Unit]
 Description=%s
@@ -20,14 +25,22 @@ After=network.target
 [Service]
 Type=simple
 ExecStart=%s
-Restart=always
+WorkingDirectory=/etc/siem-agent
+Restart=on-failure
 RestartSec=10
 User=root
-Environment="SIEM_SERVER_ADDR=localhost:50051"
+Environment="SIEM_SERVER_ADDR=%s"
 
+PermissionsStartOnly=true
+ExecStartPre=/bin/mkdir -p /var/log/SIEM_service
+ExecStartPre=/bin/chown syslog:adm /var/log/SIEM_service
+ExecStartPre=/bin/chmod 755 /var/log/SIEM_service
+StandardOutput=syslog
+StandardError=syslog
+SyslogIdentifier=SIEM_agent
 [Install]
 WantedBy=multi-user.target
-`, serviceDesc, exepath)
+`, serviceDesc, exepath, servAddr)
 
 	serviceFile := "/etc/systemd/system/siem-agent.service"
 	if err := os.WriteFile(serviceFile, []byte(serviceContent), 0644); err != nil {
@@ -43,8 +56,8 @@ WantedBy=multi-user.target
 	return nil
 }
 
-// removeSystemdService удаляет systemd service
-func removeSystemdService() error {
+// RemoveSystemdService удаляет systemd service
+func (as *AgService) RemoveSystemdService() error {
 	// Останавливаем сервис
 	exec.Command("systemctl", "stop", serviceName).Run()
 
@@ -64,11 +77,4 @@ func removeSystemdService() error {
 	}
 
 	return nil
-}
-
-func getEnvOrDefault(key, defaultValue string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
-	}
-	return defaultValue
 }

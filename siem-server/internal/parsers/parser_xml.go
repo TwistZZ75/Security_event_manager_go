@@ -77,6 +77,25 @@ func (xml_p *ParseXmlStruct) Parser(raw_log *logstructure.RawLog) (*logstructure
 	return NormalizedLog, nil
 }
 
+// sanitizeXML удаляет или заменяет недопустимые в XML символы
+func (xml_p *ParseXmlStruct) sanitizeXML(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		// Разрешённые управляющие символы
+		if r == 0x9 || r == 0xA || r == 0xD {
+			b.WriteRune(r)
+			continue
+		}
+		// Все остальные символы с кодом < 0x20 заменяем на пробел
+		if r < 0x20 {
+			b.WriteRune(' ')
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
 // функция генерации ID по содержанию лога для дедупликации логов (чтобы 1 и тот же лог дважды не записывался)
 // принимает сырой лог
 // возвращает хеш строку на основе данных из сырого лога
@@ -90,9 +109,9 @@ func (xml_p *ParseXmlStruct) GenerateID(raw_log *logstructure.RawLog) string {
 // принимает строку, которая должна содержать xml лог
 // возвращает строку
 func (xml_p *ParseXmlStruct) Define_Severity(raw_log string) string {
-
+	clean_raw_log := xml_p.sanitizeXML(raw_log)
 	var event Event
-	err := xml.Unmarshal([]byte(raw_log), &event)
+	err := xml.Unmarshal([]byte(clean_raw_log), &event)
 	if err != nil {
 		return err.Error()
 	}
@@ -121,8 +140,8 @@ func (xml_p *ParseXmlStruct) Define_Severity(raw_log string) string {
 // возвращает строку
 func (xml_p *ParseXmlStruct) Define_EventCategory(raw_log string) string {
 	var event Event
-
-	err := xml.Unmarshal([]byte(raw_log), &event)
+	clean_raw_log := xml_p.sanitizeXML(raw_log)
+	err := xml.Unmarshal([]byte(clean_raw_log), &event)
 	if err != nil {
 		return err.Error()
 	}
@@ -169,7 +188,8 @@ func (xml_p *ParseXmlStruct) categorizeSecurityEvent(eventID int) string {
 // возвращает строку
 func (xml_p *ParseXmlStruct) Define_EventDescription(raw_log string) string {
 	var event Event
-	err := xml.Unmarshal([]byte(raw_log), &event)
+	clean_raw_log := xml_p.sanitizeXML(raw_log)
+	err := xml.Unmarshal([]byte(clean_raw_log), &event)
 	if err != nil {
 		return err.Error()
 	}
@@ -190,7 +210,8 @@ func (xml_p *ParseXmlStruct) Define_EventDescription(raw_log string) string {
 // возвращает строку
 func (xml_p *ParseXmlStruct) Define_ProcessName(raw_log string) string {
 	var event Event
-	err := xml.Unmarshal([]byte(raw_log), &event)
+	clean_raw_log := xml_p.sanitizeXML(raw_log)
+	err := xml.Unmarshal([]byte(clean_raw_log), &event)
 	if err != nil {
 		return err.Error()
 	}

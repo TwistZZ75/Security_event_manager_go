@@ -16,11 +16,9 @@ import (
 // Engine представляет движок обработки правил
 type Engine struct {
 	ruleStorage *RuleStorage
-
-	// ИСПРАВЛЕНИЕ: Используем правильные имена полей
-	alertMgr   *alerts.AlertManager // ← Исправлено!
-	actionDisp ActionDispatcher     // ← Исправлено!
-	stateStore *state.StateStorage  // ← Исправлено!
+	alertMgr    *alerts.AlertManager
+	actionDisp  ActionDispatcher
+	stateStore  *state.StateStorage
 
 	rules      map[string]*Rule
 	rulesMutex sync.RWMutex
@@ -64,7 +62,7 @@ func (e *Engine) LoadRules(ctx context.Context) error {
 		}
 	}
 
-	log.Printf("✓ Loaded %d enabled rules", len(e.rules))
+	log.Printf("Loaded %d enabled rules", len(e.rules))
 	return nil
 }
 
@@ -241,7 +239,7 @@ func (e *Engine) handleCountAggregation(ctx context.Context, rule *Rule, normLog
 
 // triggerRule запускает действия при срабатывании правила
 func (e *Engine) triggerRule(ctx context.Context, rule *Rule, normLog *logstructure.NormalizedLog, stateData map[string]interface{}) error {
-	log.Printf("🚨 Rule triggered: %s (%s)", rule.Name, rule.Severity)
+	log.Printf("Rule triggered: %s (%s)", rule.Name, rule.Severity)
 
 	// Создаем алерт
 	eventData := map[string]interface{}{
@@ -278,7 +276,7 @@ func (e *Engine) triggerRule(ctx context.Context, rule *Rule, normLog *logstruct
 		return fmt.Errorf("failed to create alert: %v", err)
 	}
 
-	log.Printf("✓ Alert created: ID=%d", alert.ID)
+	log.Printf("Alert created: ID=%d", alert.ID)
 
 	// Выполняем действия через ActionDispatcher
 	for _, action := range rule.Actions {

@@ -9,14 +9,32 @@ import (
 	"siem-agent/collector"
 	"siem-agent/config"
 	"siem-agent/grpc_ag"
+	"siem-agent/utils"
 	"syscall"
 )
 
 func main() {
 	//загрузка конфига
-	cfg, err := config.LoadConfig(".")
+	cfg, err := config.LoadConfig("/usr/local/bin")
 	if err != nil {
-		fmt.Println("config truble")
+		fmt.Printf("config load failed: %v", err)
+	}
+	if len(os.Args) > 1 {
+		svc := &utils.AgService{}
+		switch os.Args[1] {
+		case "install":
+			if err := svc.InstallSystemdService(cfg); err != nil {
+				log.Fatalf("Install failed: %v", err)
+			}
+			fmt.Println("Service installed successfully")
+			return
+		case "uninstall", "remove":
+			if err := svc.RemoveSystemdService(); err != nil {
+				log.Fatalf("Remove failed: %v", err)
+			}
+			fmt.Println("Service removed successfully")
+			return
+		}
 	}
 
 	//получение информации о системе и пользователе
@@ -45,6 +63,10 @@ func main() {
 	//запуск горутины для сбора логов и их буфферизации для каждого из коллекторов
 	go grpc_ag.BatchLogs(ctx, client, collectors)
 
+	// Создаем агента
+	agent := utils.NewAgent(serverAddr, cfg)
+	agent.Start()
+
 	// Обработка Ctrl+C
 	signalChan := make(chan os.Signal, 1)
 	signal.Notify(signalChan, os.Interrupt, syscall.SIGTERM)
@@ -57,6 +79,7 @@ func main() {
 		col.Stop_collect()
 	}
 	fmt.Println("\nПолучен сигнал завершения. Останавливаем сбор логов...")
+	agent.Stop()
 
 	//cancel()
 

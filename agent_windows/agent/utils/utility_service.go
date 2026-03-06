@@ -3,14 +3,15 @@ package utils
 import (
 	"context"
 	"fmt"
-	"os"
 	"siem-agent/collector"
 	"siem-agent/grpc_ag"
 
 	"golang.org/x/sys/windows/svc"
-	"golang.org/x/sys/windows/svc/eventlog"
-	"golang.org/x/sys/windows/svc/mgr"
 )
+
+type Handler interface {
+	Execute(args []string, r <-chan svc.ChangeRequest, s chan<- svc.Status) (svcSpecificEC bool, exitCode uint32)
+}
 
 // WindowsService представляет Windows Service
 type WindowsService struct {
@@ -86,85 +87,4 @@ func (ws *WindowsService) Execute(args []string, r <-chan svc.ChangeRequest, cha
 
 	changes <- svc.Status{State: svc.StopPending}
 	return
-}
-
-// InstallService устанавливает Windows Service
-func InstallService(serviceName, serviceDesc string) error {
-	exepath, err := os.Executable()
-	if err != nil {
-		return fmt.Errorf("failed to get executable path: %v", err)
-	}
-
-	m, err := mgr.Connect()
-	if err != nil {
-		return fmt.Errorf("failed to connect to service manager: %v", err)
-	}
-	defer m.Disconnect()
-
-	s, err := m.OpenService(serviceName)
-	if err == nil {
-		s.Close()
-		return fmt.Errorf("service %s already exists", serviceName)
-	}
-
-	s, err = m.CreateService(serviceName, exepath, mgr.Config{
-		DisplayName: serviceName,
-		Description: serviceDesc,
-		StartType:   mgr.StartAutomatic,
-	})
-	if err != nil {
-		return fmt.Errorf("failed to create service: %v", err)
-	}
-	defer s.Close()
-
-	// Создаем event log source
-	err = eventlog.InstallAsEventCreate(serviceName, eventlog.Error|eventlog.Warning|eventlog.Info)
-	if err != nil {
-		s.Delete()
-		return fmt.Errorf("failed to setup event log: %v", err)
-	}
-
-	return nil
-}
-
-// RemoveService удаляет Windows Service
-func RemoveService(serviceName string) error {
-	m, err := mgr.Connect()
-	if err != nil {
-		return fmt.Errorf("failed to connect to service manager: %v", err)
-	}
-	defer m.Disconnect()
-
-	s, err := m.OpenService(serviceName)
-	if err != nil {
-		return fmt.Errorf("service %s is not installed", serviceName)
-	}
-	defer s.Close()
-
-	// Останавливаем сервис если он запущен
-	status, err := s.Query()
-	if err != nil {
-		return fmt.Errorf("failed to query service status: %v", err)
-	}
-
-	if status.State != svc.Stopped {
-		_, err = s.Control(svc.Stop)
-		if err != nil {
-			return fmt.Errorf("failed to stop service: %v", err)
-		}
-	}
-
-	// Удаляем сервис
-	err = s.Delete()
-	if err != nil {
-		return fmt.Errorf("failed to delete service: %v", err)
-	}
-
-	// Удаляем event log source
-	err = eventlog.Remove(serviceName)
-	if err != nil {
-		return fmt.Errorf("failed to remove event log source: %v", err)
-	}
-
-	return nil
 }

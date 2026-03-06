@@ -13,8 +13,9 @@ type Config struct {
 }
 
 type AgentConfig struct {
-	Hostname string `mapstructure:"hostname"`
-	OS       string `mapstructure:"os"`
+	Hostname  string `mapstructure:"hostname"`
+	OS        string `mapstructure:"os"`
+	Interface string `mapstructure:"interface"`
 }
 
 type ServerConfig struct {
@@ -56,6 +57,7 @@ func LoadConfig(path string) (*Config, error) {
 	// Значения по умолчанию
 	viper.SetDefault("agent.hostname", baseInfo.PC_name)
 	viper.SetDefault("agent.os", baseInfo.OS)
+	viper.SetDefault("agent.interface", "enp0s3")
 	viper.SetDefault("server.address", "localhost")
 	viper.SetDefault("server.port", "5000")
 

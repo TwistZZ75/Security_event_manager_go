@@ -43,7 +43,7 @@ func (am *AlertManager) CreateAlert(ctx context.Context, alert *Alert) error {
 		return fmt.Errorf("failed to create alert: %v", err)
 	}
 
-	log.Printf("✓ Alert created: ID=%d, Rule=%s, Severity=%s", alert.ID, alert.RuleName, alert.Severity)
+	log.Printf("Alert created: ID=%d, Rule=%s, Severity=%s", alert.ID, alert.RuleName, alert.Severity)
 
 	// Отправляем уведомление
 	if am.notifier != nil {
