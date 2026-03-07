@@ -25,7 +25,6 @@ After=network.target
 [Service]
 Type=simple
 ExecStart=%s
-WorkingDirectory=/etc/siem-agent
 Restart=on-failure
 RestartSec=10
 User=root

@@ -32,19 +32,19 @@ func NewLogProc(
 
 // ProcessLog обрабатывает сырой лог
 func (lp *LogProc) ProcessLog(ctx context.Context, rawLog *logsstructure.RawLog) error {
-	// 1. ПАРСИНГ
+	// парсинг логов
 	normLog, err := lp.parser.Parser(rawLog)
 	if err != nil {
 		return fmt.Errorf("failed to parse log: %v", err)
 	}
 
-	// 2. СОХРАНЕНИЕ В БД
+	// сохранение в БД
 	if err := lp.storage.Store(normLog); err != nil {
 		// Логируем ошибку, но продолжаем обработку
 		log.Printf("Failed to save log to DB: %v", err)
 	}
 
-	// 3. ПРОВЕРКА ПРАВИЛ ← САМОЕ ВАЖНОЕ ДОБАВЛЕНИЕ!
+	// проверка правил
 	if lp.ruleEngine != nil {
 		if err := lp.ruleEngine.Evaluate(ctx, normLog); err != nil {
 			// Логируем ошибку, но не прерываем обработку

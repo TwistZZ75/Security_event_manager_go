@@ -40,5 +40,14 @@ func StartAllCollectors(ctx context.Context, cfg *config.Config) []collector.Log
 			collectors = append(collectors, syslogcollector)
 		}
 	}
+	//запуск сбора логов auth
+	if cfg.Collectors.Auth.Enabled {
+		authcollector := collector.NewAuthCollector(cfg.Collectors.Auth.LogPath)
+		if err := authcollector.Start_collect(ctx); err != nil {
+			log.Println("Failed to start Auth collector")
+		} else {
+			collectors = append(collectors, authcollector)
+		}
+	}
 	return collectors
 }

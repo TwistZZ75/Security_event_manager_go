@@ -27,6 +27,7 @@ func NewParser() *Parser {
 	mp.parsers["json"] = NewSuricataParse()
 	mp.parsers["squid"] = NewSquidParse()
 	mp.parsers["syslog"] = NewSyslogParse()
+	mp.parsers["auth"] = NewAuthParse()
 
 	return mp
 }

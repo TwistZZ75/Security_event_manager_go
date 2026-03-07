@@ -9,7 +9,7 @@ server:
 
 collectors:
   suricata:
-    enabled: true
+    enabled: false
     log_path: "/var/log/suricata/eve.json"
   
   squid:
@@ -19,3 +19,7 @@ collectors:
   syslog:
     enabled: false
     log_path: "/var/log/syslog"
+  
+  auth:
+    enabled: false
+    log_path: "/var/log/auth.log"

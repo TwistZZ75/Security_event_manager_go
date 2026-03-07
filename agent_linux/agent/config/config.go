@@ -27,6 +27,7 @@ type CollectorsConfig struct {
 	Suricata SuricataConfig `mapstructure:"suricata"`
 	Squid    SquidConfig    `mapstructure:"squid"`
 	Syslog   SyslogConfig   `mapstructure:"syslog"`
+	Auth     AuthConfig     `mapstructure:"auth"`
 }
 
 type SuricataConfig struct {
@@ -40,6 +41,11 @@ type SquidConfig struct {
 }
 
 type SyslogConfig struct {
+	Enabled bool   `mapstructure:"enabled"`
+	LogPath string `mapstructure:"log_path"`
+}
+
+type AuthConfig struct {
 	Enabled bool   `mapstructure:"enabled"`
 	LogPath string `mapstructure:"log_path"`
 }
