@@ -6,6 +6,7 @@ import (
 	"siem-server/actions"
 	"siem-server/agent"
 	"siem-server/alerts"
+	"siem-server/internal/storage/postgres"
 	"siem-server/rules"
 
 	"github.com/gorilla/mux"
@@ -18,6 +19,7 @@ type WebServer struct {
 	alertStorage  *alerts.AlertStorage
 	actionStorage *actions.ActionStorage
 	ruleStorage   *rules.RuleStorage
+	LogStorage    *postgres.LogStorage
 }
 
 // NewWebServer создает новый веб-сервер
@@ -26,6 +28,7 @@ func NewWebServer(
 	alertStorage *alerts.AlertStorage,
 	actionStorage *actions.ActionStorage,
 	ruleStorage *rules.RuleStorage,
+	LogStorage *postgres.LogStorage,
 ) *WebServer {
 	ws := &WebServer{
 		router:        mux.NewRouter(),
@@ -33,6 +36,7 @@ func NewWebServer(
 		alertStorage:  alertStorage,
 		actionStorage: actionStorage,
 		ruleStorage:   ruleStorage,
+		LogStorage:    LogStorage,
 	}
 
 	ws.setupRoutes()
@@ -41,6 +45,6 @@ func NewWebServer(
 
 // Start запускает веб-сервер
 func (ws *WebServer) Start(addr string) error {
-	log.Printf("✓ Web server starting on %s", addr)
+	log.Printf("Web server starting on %s", addr)
 	return http.ListenAndServe(addr, ws.router)
 }

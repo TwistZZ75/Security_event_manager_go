@@ -110,6 +110,7 @@ func main() {
 		alertStorage,
 		actionStorage,
 		ruleStorage,
+		logStorage,
 	)
 
 	// Запускаем веб-сервер в отдельной горутине

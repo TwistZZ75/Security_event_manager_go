@@ -19,3 +19,17 @@ type NormalizedLog struct {
 	Source            string    //источник лога
 	Raw_log           string    //исходный лог
 }
+
+// LogFilter описывает параметры фильтрации и пагинации логов.
+type LogFilter struct {
+	PCName   string    // фильтр по имени компьютера
+	Username string    // фильтр по пользователю
+	Severity string    // фильтр по важности (INFO, WARNING, DANGER)
+	Category string    // фильтр по категории события
+	Source   string    // фильтр по источнику лога
+	OS       string    // фильтр по ОС
+	From     time.Time // начало временного диапазона
+	To       time.Time // конец временного диапазона
+	Limit    int       // кол-во записей на страницу (0 = без ограничений)
+	Offset   int       // смещение для пагинации
+}

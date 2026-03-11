@@ -20,6 +20,7 @@ func (ws *WebServer) setupRoutes() {
 	// Alerts
 	api.HandleFunc("/alerts", ws.handleGetAlerts).Methods("GET", "OPTIONS")
 	api.HandleFunc("/alerts/{id}", ws.handleGetAlert).Methods("GET", "OPTIONS")
+	api.HandleFunc("/alerts/{id}/status", ws.handleUpdateAlertStatus).Methods("PATCH", "OPTIONS")
 
 	// Actions
 	api.HandleFunc("/actions", ws.handleGetActions).Methods("GET", "OPTIONS")
@@ -31,6 +32,9 @@ func (ws *WebServer) setupRoutes() {
 	api.HandleFunc("/rules/{id}", ws.handleGetRule).Methods("GET", "OPTIONS")
 	api.HandleFunc("/rules/{id}", ws.handleUpdateRule).Methods("PUT", "OPTIONS")
 	api.HandleFunc("/rules/{id}", ws.handleDeleteRule).Methods("DELETE", "OPTIONS")
+	api.HandleFunc("/rules/{id}/enabled", ws.handleSetRuleEnabled).Methods("PATCH", "OPTIONS")
+
+	api.HandleFunc("/events", ws.handleGetEvents).Methods("GET", "OPTIONS")
 
 	// Static files (serve the web interface)
 	ws.router.PathPrefix("/").Handler(http.FileServer(http.Dir("./web_server/static")))

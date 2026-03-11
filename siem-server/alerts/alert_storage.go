@@ -70,10 +70,10 @@ func (ast *AlertStorage) GetAlert(ctx context.Context, id string) (*Alert, error
 			status,
 			created_at,
 			acknowledged_at,
-			acknowledged_by,
+			COALESCE(acknowledged_by, '') as acknowledged_by,
 			resolved_at,
-			resolved_by,
-			notes
+			COALESCE(resolved_by, '') as resolved_by,
+    		COALESCE(notes, '') as notes
 		FROM alerts
 		WHERE id = $1
 	`
@@ -165,7 +165,10 @@ func (ast *AlertStorage) GetAlerts(ctx context.Context, filter AlertFilter) ([]*
 		SELECT 
 			id, rule_id, rule_name, severity, title, description,
 			event_data, status, created_at, acknowledged_at,
-			acknowledged_by, resolved_at, resolved_by, notes
+			COALESCE(acknowledged_by, '') as acknowledged_by,
+			resolved_at,
+			COALESCE(resolved_by, '') as resolved_by,
+    		COALESCE(notes, '') as notes
 		FROM alerts
 		WHERE 1=1
 	`
@@ -252,6 +255,17 @@ func (ast *AlertStorage) UpdateAlert(ctx context.Context, id int64, status strin
 	var args []interface{}
 
 	switch status {
+	case StatusOpen:
+		query = `
+            UPDATE alerts
+            SET status          = $1,
+                acknowledged_at = NULL,
+                acknowledged_by = NULL,
+                resolved_at     = NULL,
+                resolved_by     = NULL,
+                notes           = $2
+            WHERE id = $3`
+		args = []interface{}{status, notes, id}
 	case StatusAcknowledged:
 		query = `
 			UPDATE alerts

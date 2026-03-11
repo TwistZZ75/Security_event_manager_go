@@ -1,9 +1,12 @@
 package webserver
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"siem-server/rules"
+	"strconv"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -106,6 +109,43 @@ func (ws *WebServer) handleGetAlert(w http.ResponseWriter, r *http.Request) {
 	respondWithJSON(w, http.StatusOK, alert)
 }
 
+func (ws *WebServer) handleUpdateAlertStatus(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	alertIDStr := vars["id"]
+
+	alertID, err := strconv.ParseInt(alertIDStr, 10, 64)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid alert ID")
+		return
+	}
+
+	var body struct {
+		Status    string `json:"status"`
+		Notes     string `json:"notes"`
+		UpdatedBy string `json:"updated_by"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	//если фронт не передал пользователя
+	if body.UpdatedBy == "" {
+		body.UpdatedBy = "web"
+	}
+
+	ctx := r.Context()
+	if err := ws.alertStorage.UpdateAlert(ctx, alertID, body.Status, "web", body.Notes); err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Failed to update alert")
+		return
+	}
+
+	respondWithJSON(w, http.StatusOK, map[string]interface{}{
+		"id":         alertID,
+		"status":     body.Status,
+		"updated_by": body.UpdatedBy,
+	})
+}
+
 // ============================================================================
 // HANDLERS - ACTIONS
 // ============================================================================
@@ -172,6 +212,32 @@ func (ws *WebServer) handleCreateRule(w http.ResponseWriter, r *http.Request) {
 		respondWithError(w, http.StatusBadRequest, "Invalid request")
 		return
 	}
+	var aggregationJSON []byte
+
+	conditionsJSON, _ := json.Marshal(rule.Conditions)
+	if rule.Aggregation != nil {
+		aggregationJSON, _ = json.Marshal(rule.Aggregation)
+	}
+
+	// Генерируем ID если не задан
+	if rule.ID == "" {
+		var raw string
+		if rule.Aggregation != nil {
+			raw = rule.Name + rule.Severity + string(conditionsJSON) + string(aggregationJSON)
+		} else {
+			raw = rule.Name + rule.Severity + string(conditionsJSON)
+		}
+		hash := sha256.Sum256([]byte(raw))
+		rule.ID = hex.EncodeToString(hash[:])
+	}
+
+	// Устанавливаем время создания если не задано
+	if rule.CreatedAt.IsZero() {
+		rule.CreatedAt = time.Now()
+	}
+	if rule.CreatedBy == "" {
+		rule.CreatedBy = "web"
+	}
 
 	ctx := r.Context()
 	if err := ws.ruleStorage.SaveRule(ctx, &rule); err != nil {
@@ -216,6 +282,30 @@ func (ws *WebServer) handleDeleteRule(w http.ResponseWriter, r *http.Request) {
 	respondWithJSON(w, http.StatusOK, map[string]string{"message": "Rule deleted successfully"})
 }
 
+func (ws *WebServer) handleSetRuleEnabled(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	ruleID := vars["id"]
+
+	var body struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	ctx := r.Context()
+	if err := ws.ruleStorage.SetRuleEnabled(ctx, ruleID, body.Enabled); err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Failed to update rule")
+		return
+	}
+
+	respondWithJSON(w, http.StatusOK, map[string]interface{}{
+		"id":      ruleID,
+		"enabled": body.Enabled,
+	})
+}
+
 // ============================================================================
 // HELPER FUNCTIONS
 // ============================================================================
@@ -235,4 +325,49 @@ func respondWithJSON(w http.ResponseWriter, code int, payload interface{}) {
 
 func respondWithError(w http.ResponseWriter, code int, message string) {
 	respondWithJSON(w, code, map[string]string{"error": message})
+}
+
+// ============================================================================
+// HANDLERS - EVENTS (normalized_events)
+// ============================================================================
+
+func (ws *WebServer) handleGetEvents(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	logs, err := ws.LogStorage.GetRecent(ctx, 500)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Failed to fetch events")
+		return
+	}
+
+	type Event struct {
+		ID               string `json:"id"`
+		PCName           string `json:"pc_name"`
+		Username         string `json:"username"`
+		EventDescription string `json:"event_description"`
+		EventCategory    string `json:"event_category"`
+		ProcessName      string `json:"process_name"`
+		Severity         string `json:"severity"`
+		Timestamp        string `json:"timestamp"`
+		OS               string `json:"os"`
+		Source           string `json:"source"`
+	}
+
+	events := make([]Event, 0, len(logs))
+	for _, l := range logs {
+		events = append(events, Event{
+			ID:               l.ID,
+			PCName:           l.PC_name,
+			Username:         l.Username,
+			EventDescription: l.Event_description,
+			EventCategory:    l.Event_category,
+			ProcessName:      l.Process_name,
+			Severity:         l.Severity,
+			Timestamp:        l.Timestamp.Format(time.RFC3339),
+			OS:               l.OS,
+			Source:           l.Source,
+		})
+	}
+
+	respondWithJSON(w, http.StatusOK, events)
 }
