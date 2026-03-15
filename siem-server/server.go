@@ -122,8 +122,6 @@ func main() {
 
 	log.Println("Web interface available at http://localhost:8080")
 
-	// TODO: Добавить другие handlers когда будут готовы
-	// ruleHandler := delivery.NewRuleHandler(ruleStorage, alertStorage)
 	agentHandler := agent.NewAgentServiceHandler(agentStorage, commandQueue)
 
 	log.Println("Handlers initialized")
@@ -155,7 +153,24 @@ func main() {
 				log.Printf("Failed to reload rules: %v", err)
 			} else {
 				count, _ := ruleStorage.GetEnabledRulesCount(ctx)
-				log.Printf("✓ Rules reloaded: %d enabled", count)
+				log.Printf("Rules reloaded: %d enabled", count)
+			}
+		}
+	}()
+
+	go func() {
+		if err := agentStorage.MarkOfflineAgents(ctx); err != nil {
+			log.Printf("Failed to mark agent offline: %v", err)
+		}
+		ticker := time.NewTicker(1 * time.Minute)
+		defer ticker.Stop()
+
+		for range ticker.C {
+			if err := agentStorage.MarkOfflineAgents(ctx); err != nil {
+				log.Printf("Failed to mark agent offline: %v", err)
+			} else {
+				agentStorage.MarkOfflineAgents(ctx)
+				log.Printf("Agent marked offline")
 			}
 		}
 	}()

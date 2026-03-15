@@ -425,6 +425,23 @@ func (cq *CommandQueue) UpdateCommandStatus(ctx context.Context, commandID int64
 	return nil
 }
 
+// StartOfflineChecker запускает периодическую проверку offline агентов
+func (as *AgentStorage) StartOfflineChecker(ctx context.Context) {
+	ticker := time.NewTicker(1 * time.Minute)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			if err := as.MarkOfflineAgents(ctx); err != nil {
+				fmt.Printf("Error marking offline agents: %v\n", err)
+			}
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
 // MarkOfflineAgents помечает агентов как offline если last_seen > 5 минут
 func (as *AgentStorage) MarkOfflineAgents(ctx context.Context) error {
 	query := `
@@ -445,21 +462,4 @@ func (as *AgentStorage) MarkOfflineAgents(ctx context.Context) error {
 	}
 
 	return nil
-}
-
-// StartOfflineChecker запускает периодическую проверку offline агентов
-func (as *AgentStorage) StartOfflineChecker(ctx context.Context) {
-	ticker := time.NewTicker(1 * time.Minute)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			if err := as.MarkOfflineAgents(ctx); err != nil {
-				fmt.Printf("Error marking offline agents: %v\n", err)
-			}
-		case <-ctx.Done():
-			return
-		}
-	}
 }
