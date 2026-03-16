@@ -56,6 +56,17 @@ export async function getAgent(id: string): Promise<Agent> {
   return request<Agent>(`/agents/${id}`);
 }
 
+export async function sendAgentCommand(
+  hostname: string,
+  commandType: string,
+  parameters: Record<string, string> = {}
+): Promise<{ id: number; status: string }> {
+  return request(`/agents/${encodeURIComponent(hostname)}/command`, {
+    method: 'POST',
+    body: JSON.stringify({ command_type: commandType, parameters }),
+  });
+}
+
 // Alerts
 export async function getAlerts(): Promise<Alert[]> {
   const data = await request<Alert[] | null>('/alerts');

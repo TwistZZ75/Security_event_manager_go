@@ -232,7 +232,8 @@ func (tn *TelegramNotifier) Send(ctx context.Context, alert *alerts.Alert) error
 
 	resp, err := tn.client.Do(req)
 	if err != nil {
-		return fmt.Errorf("failed to send telegram message: %v", err)
+		return fmt.Errorf("failed to send telegram message: %v", err) //в базу сохранять только сообщение о неудаче,
+		// а саму ошибку нужно перенести в логи сервера
 	}
 	defer resp.Body.Close()
 

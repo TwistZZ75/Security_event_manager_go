@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { PieChart, Pie, Cell, AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
-import { Bell, AlertTriangle, CheckCircle, Clock, XCircle } from 'lucide-react';
+import { Bell, AlertTriangle, CheckCircle, Clock, XCircle, RotateCcw } from 'lucide-react';
 import { getAlerts, updateAlertStatus } from '../api/api';
+import { useAuth } from '../contexts/AuthContext';
 import type { Alert } from '../types';
 import StatCard from '../components/StatCard';
 import PaginatedTable from '../components/PaginatedTable';
@@ -15,6 +16,7 @@ const SEV_ORDER = ['critical', 'high', 'medium', 'low'];
 const SEV_COLORS: Record<string, string> = { critical: '#ff3055', high: '#ff5f6d', medium: '#ffa94d', low: '#C3FDB8' };
 
 export default function AlertsPage() {
+  const { username } = useAuth();   
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -52,7 +54,9 @@ export default function AlertsPage() {
     try {
       await updateAlertStatus(selected.id, statusChoice, notes);
       // update local state
-      setAlerts(prev => prev.map(a => a.id === selected.id ? { ...a, status: statusChoice as Alert['status'] } : a));
+      setAlerts(prev =>
+        prev.map(a => a.id === selected.id ? { ...a, status: statusChoice as Alert['status'] } : a)
+      );
       closeModal();
     } catch (e) {
       setSendError(e instanceof Error ? e.message : 'Failed to update');
@@ -63,7 +67,7 @@ export default function AlertsPage() {
 
   const critical = alerts.filter(a => a.severity === 'critical').length;
   const open     = alerts.filter(a => a.status === 'open').length;
-  const resolved = alerts.filter(a => a.status === 'resolved').length;
+  const resolved = alerts.filter(a => a.status === 'resolved').length + alerts.filter(a=>a.status === 'false_positive').length;
 
   const pieData = SEV_ORDER
     .map(s => ({ name: s, value: alerts.filter(a => a.severity === s).length, color: SEV_COLORS[s] }))

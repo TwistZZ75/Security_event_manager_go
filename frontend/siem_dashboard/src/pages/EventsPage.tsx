@@ -8,6 +8,7 @@ import PaginatedTable from '../components/PaginatedTable';
 import PageHeader from '../components/PageHeader';
 import PieLegend from '../components/PieLegend';
 import JsonModal from '../components/JsonModal';
+import AgentMiniModal from '../components/AgentMiniModal';
 import SeverityBadge from '../components/SeverityBadge';
 
 const SEV_COLORS: Record<string, string> = {
@@ -22,6 +23,7 @@ export default function EventsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [selected, setSelected] = useState<NormalizedEvent | null>(null);
+  const [agentHostname, setAgentHostname] = useState<string | null>(null);
 
   useEffect(() => {
     getEvents()
@@ -55,7 +57,17 @@ export default function EventsPage() {
         </span>
       ) },
     { key: 'pc_name', header: 'Host', width: '120px',
-      render: (e: NormalizedEvent) => <span style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', fontWeight: 700 }}>{e.pc_name}</span> },
+      render: (e: NormalizedEvent) => (
+        <span
+          onClick={ev => { ev.stopPropagation(); setAgentHostname(e.pc_name); }}
+          title="Click to view agent info"
+          style={{
+            fontFamily: 'var(--font-mono)', fontSize: '12px', fontWeight: 700,
+            color: 'var(--mint)', cursor: 'pointer',
+            textDecoration: 'underline dotted', textUnderlineOffset: '3px',
+          }}
+        >{e.pc_name}</span>
+      ) },
     { key: 'username', header: 'User', width: '110px',
       render: (e: NormalizedEvent) => <span style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--text-secondary)' }}>{e.username || '—'}</span> },
     { key: 'category', header: 'Category', width: '130px',
@@ -162,6 +174,13 @@ export default function EventsPage() {
           }
           data={selected}
           onClose={() => setSelected(null)}
+        />
+      )}
+
+      {agentHostname && (
+        <AgentMiniModal
+          hostname={agentHostname}
+          onClose={() => setAgentHostname(null)}
         />
       )}
     </div>

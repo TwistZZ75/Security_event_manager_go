@@ -4,6 +4,7 @@ import { login as apiLogin } from '../api/api';
 interface AuthContextType {
   isAuthenticated: boolean;
   token: string | null;
+  username: string;           
   login: (username: string, password: string) => Promise<void>;
   logout: () => void;
 }
@@ -14,23 +15,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [token, setToken] = useState<string | null>(() =>
     localStorage.getItem('siem_token')
   );
+  // Сохраняем username отдельно, чтобы передавать на бэк при изменении статуса алёрта
+  const [username, setUsername] = useState<string>(
+    () => localStorage.getItem('siem_username') ?? ''
+  );
 
-  const login = useCallback(async (username: string, password: string) => {
-    const res = await apiLogin({ username, password });
+  const login = useCallback(async (uname: string, password: string) => {
+    const res = await apiLogin({ username: uname, password });
     if (!res.success || !res.token) {
       throw new Error(res.message || 'Login failed');
     }
     localStorage.setItem('siem_token', res.token);
+    localStorage.setItem('siem_username', uname);
     setToken(res.token);
+    setUsername(uname);
   }, []);
 
   const logout = useCallback(() => {
     localStorage.removeItem('siem_token');
+    localStorage.removeItem('siem_username');
     setToken(null);
+    setUsername('');
   }, []);
 
   return (
-    <AuthContext.Provider value={{ isAuthenticated: !!token, token, login, logout }}>
+    <AuthContext.Provider value={{ isAuthenticated: !!token, token, username, login, logout }}>
       {children}
     </AuthContext.Provider>
   );
