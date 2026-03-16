@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, PieChart, Pie } from 'recharts';
-import { Activity, AlertTriangle } from 'lucide-react';
+import { Activity, AlertTriangle, Download } from 'lucide-react';
 import { getEvents } from '../api/api';
+import { fmtDateShort, parseDate } from '../utils/date';
 import type { NormalizedEvent } from '../types';
 import StatCard from '../components/StatCard';
 import PaginatedTable from '../components/PaginatedTable';
@@ -9,28 +10,45 @@ import PageHeader from '../components/PageHeader';
 import PieLegend from '../components/PieLegend';
 import JsonModal from '../components/JsonModal';
 import AgentMiniModal from '../components/AgentMiniModal';
-import SeverityBadge from '../components/SeverityBadge';
 
+// Все возможные значения severity от парсеров (XML: "Info","Warning","Error","Critical"; syslog/auth: аналогично)
 const SEV_COLORS: Record<string, string> = {
-  DANGER: '#ff3055', WARNING: '#ffa94d', INFO: '#C3FDB8',
-  danger: '#ff3055', warning: '#ffa94d', info: '#C3FDB8',
-  high: '#ff5f6d', medium: '#ffa94d', low: '#C3FDB8', critical: '#ff3055',
+  // Capitalized (XML parser output)
+  Critical: '#ff3055', Error: '#ff5f6d', Warning: '#ffa94d',
+  Info: '#C3FDB8',     Verbose: '#888bac', Undefined: '#555577',
+  // Lowercase
+  critical: '#ff3055', error: '#ff5f6d', warning: '#ffa94d',
+  info: '#C3FDB8',     verbose: '#888bac',
+  // ALL CAPS
+  CRITICAL: '#ff3055', ERROR: '#ff5f6d', WARNING: '#ffa94d', INFO: '#C3FDB8',
+  // Suricata
+  high: '#ff5f6d', medium: '#ffa94d', low: '#C3FDB8',
+  High: '#ff5f6d', Medium: '#ffa94d', Low: '#C3FDB8',
+  // Auth parser
+  danger: '#ff3055', DANGER: '#ff3055',
 };
 const CAT_COLORS = ['#C3FDB8', '#a0e095', '#64b4ff', '#ffa94d', '#b47cff', '#ff5f6d'];
+const LIMIT_OPTIONS = [100, 500, 1000, 5000, 10000];
 
 export default function EventsPage() {
   const [events, setEvents] = useState<NormalizedEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [selected, setSelected] = useState<NormalizedEvent | null>(null);
+  const [limit, setLimit] = useState<number>(10000);
+  const [totalCount, setTotalCount] = useState<number>(0);
   const [agentHostname, setAgentHostname] = useState<string | null>(null);
 
   useEffect(() => {
-    getEvents()
-      .then(setEvents)
+    setLoading(true);
+    getEvents(limit)
+      .then(data => {
+        setEvents(data ?? []);
+        setTotalCount(data?.length ?? 0);
+      })
       .catch(e => setError(e.message))
       .finally(() => setLoading(false));
-  }, []);
+  }, [limit]);
 
   const categories: Record<string, number> = {};
   const severities: Record<string, number> = {};
@@ -48,15 +66,17 @@ export default function EventsPage() {
   }));
 
   const columns = [
-    { key: 'timestamp', header: 'Time', width: '130px',
-      render: (e: NormalizedEvent) => <span style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)', fontSize: '11px' }}>{fmt(e.timestamp)}</span> },
+    { key: 'timestamp', header: 'Time', width: '110px',
+      render: (e: NormalizedEvent) => <span style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)', fontSize: '11px' }}>{fmtDateShort(e.timestamp)}</span>,
+      sortValue: (e: NormalizedEvent) => parseDate(e.timestamp) },
     { key: 'severity', header: 'Sev', width: '80px',
+      sortValue: (row: NormalizedEvent) => ['Error','Warning','Info'].indexOf(row.severity),
       render: (e: NormalizedEvent) => (
         <span style={{ fontSize: '10px', fontFamily: 'var(--font-display)', fontWeight: 700, padding: '2px 8px', borderRadius: '10px', textTransform: 'uppercase', color: SEV_COLORS[e.severity] || 'var(--text-secondary)', background: (SEV_COLORS[e.severity] || '#888') + '18' }}>
           {e.severity}
         </span>
       ) },
-    { key: 'pc_name', header: 'Host', width: '120px',
+    { key: 'pc_name', header: 'Host', width: '120px', sortValue: (e: NormalizedEvent) => e.pc_name,
       render: (e: NormalizedEvent) => (
         <span
           onClick={ev => { ev.stopPropagation(); setAgentHostname(e.pc_name); }}
@@ -68,15 +88,16 @@ export default function EventsPage() {
           }}
         >{e.pc_name}</span>
       ) },
-    { key: 'username', header: 'User', width: '110px',
+    { key: 'username', header: 'User', width: '90px',
       render: (e: NormalizedEvent) => <span style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--text-secondary)' }}>{e.username || '—'}</span> },
-    { key: 'category', header: 'Category', width: '130px',
+    { key: 'category', header: 'Category', width: '150px', sortValue: (e: NormalizedEvent) => e.event_category,
       render: (e: NormalizedEvent) => <span style={{ fontSize: '11px', color: 'var(--mint)', background: 'var(--mint-glow)', padding: '2px 7px', borderRadius: '4px' }}>{e.event_category}</span> },
-    { key: 'event_description', header: 'Description',
-      render: (e: NormalizedEvent) => <span style={{ color: 'var(--text-secondary)', fontSize: '12px' }}>{e.event_description.length > 80 ? e.event_description.slice(0, 78) + '…' : e.event_description}</span> },
-    { key: 'process_name', header: 'Process', width: '110px',
-      render: (e: NormalizedEvent) => <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-secondary)' }}>{e.process_name || '—'}</span> },
-    { key: 'source', header: 'Source', width: '80px',
+    { key: 'event_description', header: 'Description', width: 'auto',
+      render: (e: NormalizedEvent) => <span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-secondary)', fontSize: '12px',
+      }}>{e.event_description.length > 80 ? e.event_description.slice(0, 78) + '…' : e.event_description}</span> },
+    { key: 'process_name', header: 'Process', width: '150px',
+      render: (e: NormalizedEvent) => <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-secondary)', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',}}>{e.process_name || '—'}</span> },
+    { key: 'source', header: 'Source', width: '120px',sortValue: (e: NormalizedEvent) => e.source,
       render: (e: NormalizedEvent) => <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>{e.source}</span> },
   ];
 
@@ -155,9 +176,36 @@ export default function EventsPage() {
             </div>
 
             <div>
-              <h2 style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '16px', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <Activity size={16} /> Events
-              </h2>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', flexWrap: 'wrap', gap: '8px' }}>
+                <h2 style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '16px', display: 'flex', alignItems: 'center', gap: '8px', margin: 0 }}>
+                  <Activity size={16} /> Events
+                  <span style={{ fontSize: '11px', fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)', fontWeight: 400 }}>
+                    ({events.length} uploaded)
+                  </span>
+                </h2>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Upload:</span>
+                  <select
+                    value={limit}
+                    onChange={e => setLimit(Number(e.target.value))}
+                    style={{
+                      background: 'var(--navy-light)',
+                      border: '1px solid var(--navy-border)',
+                      color: 'var(--mint)',
+                      borderRadius: '6px',
+                      padding: '5px 10px',
+                      fontSize: '12px',
+                      fontFamily: 'var(--font-mono)',
+                      cursor: 'pointer',
+                      outline: 'none',
+                    }}
+                  >
+                    {[100, 500, 1000, 5000, 10000].map(n => (
+                      <option key={n} value={n}>{n.toLocaleString()} events</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
               <PaginatedTable data={sortedEvents} columns={columns} keyFn={e => e.id} onRowClick={setSelected} />
             </div>
           </>
@@ -187,11 +235,8 @@ export default function EventsPage() {
   );
 }
 
-function fmt(s?: string) {
-  if (!s) return '—';
-  const d = new Date(s);
-  return isNaN(d.getTime()) ? '—' : d.toLocaleString();
-}
+// Legacy fmt alias for modal subtitle usage
+function fmt(s?: string) { return fmtDateShort(s); }
 function EmptyChart() { return <div style={{ height: '150px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary)', fontSize: '13px' }}>No data</div>; }
 function Spinner() {
   return (

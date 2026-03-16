@@ -38,10 +38,12 @@ export default function StatCard({ label, value, sub, accent, icon }: StatCardPr
       </div>
       <div style={{
         fontSize: '32px',
-        fontFamily: 'var(--font-display)',
+        fontFamily: 'var(--font-mono)',
         fontWeight: 800,
         color: accent || 'var(--mint)',
         lineHeight: 1,
+        fontVariantNumeric: 'tabular-nums',
+        fontFeatureSettings: '"tnum" 1',    
       }}>
         {value}
       </div>

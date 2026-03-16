@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net"
 	"regexp"
 	"siem-server/alerts"
 	logstructure "siem-server/internal/logsstructure"
 	"siem-server/state"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -107,51 +109,188 @@ func (e *Engine) checkConditions(conditions []Condition, normLog *logstructure.N
 	return true
 }
 
-// checkCondition проверяет одно условие
 func (e *Engine) checkCondition(cond Condition, normLog *logstructure.NormalizedLog) bool {
-	// Получаем значение поля из лога
 	fieldValue := e.getFieldValue(cond.Field, normLog)
 	if fieldValue == nil {
 		return false
 	}
 
-	// Применяем оператор
+	fieldStr := fmt.Sprintf("%v", fieldValue)
+	fieldLow := strings.ToLower(fieldStr)
+
 	switch cond.Operator {
+
+	// ── Строковые операторы (регистронезависимые) ──────────────────────────
+
 	case OpEquals:
-		return fmt.Sprintf("%v", fieldValue) == fmt.Sprintf("%v", cond.Value)
+		return fieldLow == strings.ToLower(fmt.Sprintf("%v", cond.Value))
+
 	case OpNotEquals:
-		return fmt.Sprintf("%v", fieldValue) != fmt.Sprintf("%v", cond.Value)
+		return fieldLow != strings.ToLower(fmt.Sprintf("%v", cond.Value))
+
 	case OpContains:
-		return strings.Contains(
-			strings.ToLower(fmt.Sprintf("%v", fieldValue)),
-			strings.ToLower(fmt.Sprintf("%v", cond.Value)),
-		)
+		return strings.Contains(fieldLow, strings.ToLower(fmt.Sprintf("%v", cond.Value)))
+
 	case OpNotContains:
-		return !strings.Contains(
-			strings.ToLower(fmt.Sprintf("%v", fieldValue)),
-			strings.ToLower(fmt.Sprintf("%v", cond.Value)),
-		)
+		return !strings.Contains(fieldLow, strings.ToLower(fmt.Sprintf("%v", cond.Value)))
+
 	case OpStartsWith:
-		return strings.HasPrefix(
-			strings.ToLower(fmt.Sprintf("%v", fieldValue)),
-			strings.ToLower(fmt.Sprintf("%v", cond.Value)),
-		)
+		return strings.HasPrefix(fieldLow, strings.ToLower(fmt.Sprintf("%v", cond.Value)))
+
 	case OpEndsWith:
-		return strings.HasSuffix(
-			strings.ToLower(fmt.Sprintf("%v", fieldValue)),
-			strings.ToLower(fmt.Sprintf("%v", cond.Value)),
-		)
+		return strings.HasSuffix(fieldLow, strings.ToLower(fmt.Sprintf("%v", cond.Value)))
+
 	case OpRegex:
 		pattern, ok := cond.Value.(string)
 		if !ok {
+			log.Printf("checkCondition: regex value must be string, got %T", cond.Value)
 			return false
 		}
-		matched, err := regexp.MatchString(pattern, fmt.Sprintf("%v", fieldValue))
-		return err == nil && matched
+		re, err := regexp.Compile(pattern)
+		if err != nil {
+			log.Printf("checkCondition: invalid regex %q: %v", pattern, err)
+			return false
+		}
+		return re.MatchString(fieldStr)
+
+	// ── in / not_in ────────────────────────────────────────────────────────
+	//
+	// cond.Value может прийти как:
+	//   []interface{}{"Logon Failure", "SSH Auth Failure"}  ← из JSON (SaveRule)
+	//   []string{"Logon Failure", "SSH Auth Failure"}       ← из кода
+	//
+	// Сравнение регистронезависимое.
+
+	case OpIn:
+		items := toStringSlice(cond.Value)
+		if items == nil {
+			log.Printf("checkCondition: 'in' operator requires array value, got %T", cond.Value)
+			return false
+		}
+		for _, item := range items {
+			if fieldLow == strings.ToLower(item) {
+				return true
+			}
+		}
+		return false
+
+	case OpNotIn:
+		items := toStringSlice(cond.Value)
+		if items == nil {
+			log.Printf("checkCondition: 'not_in' operator requires array value, got %T", cond.Value)
+			return true // если массив не распознан — не блокируем
+		}
+		for _, item := range items {
+			if fieldLow == strings.ToLower(item) {
+				return false
+			}
+		}
+		return true
+
+	// ── Числовые операторы ─────────────────────────────────────────────────
+	//
+	// Оба значения — поле лога и значение условия — парсятся в float64.
+	// Если поле содержит нечисловую строку (например "Warning") — возвращаем false.
+
+	case OpGreaterThan:
+		fv, cv, ok := numericPair(fieldStr, cond.Value)
+		if !ok {
+			return false
+		}
+		return fv > cv
+
+	case OpLessThan:
+		fv, cv, ok := numericPair(fieldStr, cond.Value)
+		if !ok {
+			return false
+		}
+		return fv < cv
+
+	case OpGreaterOrEq:
+		fv, cv, ok := numericPair(fieldStr, cond.Value)
+		if !ok {
+			return false
+		}
+		return fv >= cv
+
+	case OpLessOrEq:
+		fv, cv, ok := numericPair(fieldStr, cond.Value)
+		if !ok {
+			return false
+		}
+		return fv <= cv
+
+	// ── IP-операторы ───────────────────────────────────────────────────────
+	//
+	// Для ip_equals:   "value": "192.168.1.10"
+	// Для ip_in_range: "value": "192.168.1.0/24"  (CIDR-нотация)
+
+	case OpIPEquals:
+		target, ok := cond.Value.(string)
+		if !ok {
+			return false
+		}
+		ip := net.ParseIP(strings.TrimSpace(fieldStr))
+		targetIP := net.ParseIP(strings.TrimSpace(target))
+		if ip == nil || targetIP == nil {
+			return false
+		}
+		return ip.Equal(targetIP)
+
+	case OpIPInRange:
+		cidr, ok := cond.Value.(string)
+		if !ok {
+			return false
+		}
+		ip := net.ParseIP(strings.TrimSpace(fieldStr))
+		if ip == nil {
+			return false
+		}
+		_, network, err := net.ParseCIDR(strings.TrimSpace(cidr))
+		if err != nil {
+			log.Printf("checkCondition: invalid CIDR %q: %v", cidr, err)
+			return false
+		}
+		return network.Contains(ip)
+
 	default:
-		log.Printf("Unknown operator: %s", cond.Operator)
+		log.Printf("checkCondition: unknown operator %q in rule condition", cond.Operator)
 		return false
 	}
+}
+
+// =============================================================================
+// Вспомогательные функции (добавить в тот же файл rules_engine.go)
+// =============================================================================
+
+// toStringSlice преобразует interface{} в []string.
+// Поддерживает []interface{} (из JSON) и []string (из кода).
+func toStringSlice(v interface{}) []string {
+	switch val := v.(type) {
+	case []string:
+		return val
+	case []interface{}:
+		result := make([]string, 0, len(val))
+		for _, item := range val {
+			result = append(result, fmt.Sprintf("%v", item))
+		}
+		return result
+	}
+	return nil
+}
+
+// numericPair парсит значение поля и значение условия в float64.
+// Возвращает (fieldFloat, condFloat, ok).
+func numericPair(fieldStr string, condValue interface{}) (float64, float64, bool) {
+	fv, err := strconv.ParseFloat(strings.TrimSpace(fieldStr), 64)
+	if err != nil {
+		return 0, 0, false
+	}
+	cv, err := strconv.ParseFloat(fmt.Sprintf("%v", condValue), 64)
+	if err != nil {
+		return 0, 0, false
+	}
+	return fv, cv, true
 }
 
 // getFieldValue извлекает значение поля из нормализованного лога
@@ -195,41 +334,72 @@ func (e *Engine) handleAggregation(ctx context.Context, rule *Rule, normLog *log
 	}
 }
 
-// handleCountAggregation обрабатывает подсчет событий
+// handleCountAggregation — обработка агрегации типа "count".
+// Считает количество подходящих событий в заданном временном окне.
+// Если счётчик достигает порога — правило срабатывает.
 func (e *Engine) handleCountAggregation(ctx context.Context, rule *Rule, normLog *logstructure.NormalizedLog) error {
-	// Получаем значение поля для группировки
-	groupValue := e.getFieldValue(rule.Aggregation.Field, normLog)
-	if groupValue == nil {
-		groupValue = "default"
-	}
-	groupKey := fmt.Sprintf("%s:%v", rule.Aggregation.Field, groupValue)
 
-	// Парсим временное окно
+	// ── Валидация полей агрегации ─────────────────────────────────────────────
+
+	if rule.Aggregation.TimeWindow == "" {
+		return fmt.Errorf("rule %q: aggregation.time_window is empty (use format: 5m, 1h, 30s)", rule.Name)
+	}
+
 	window, err := parseDuration(rule.Aggregation.TimeWindow)
 	if err != nil {
-		return fmt.Errorf("invalid time window: %v", err)
+		return fmt.Errorf("rule %q: invalid aggregation.time_window %q: %w (use format: 5m, 1h, 30s)", rule.Name, rule.Aggregation.TimeWindow, err)
 	}
 
-	// Увеличиваем счетчик
-	state, err := e.stateStore.IncrementCounter(ctx, rule.ID, groupKey, window)
+	if rule.Aggregation.Threshold <= 0 {
+		return fmt.Errorf("rule %q: aggregation.threshold must be > 0, got %d", rule.Name, rule.Aggregation.Threshold)
+	}
+
+	// ── Формирование ключа группировки ───────────────────────────────────────
+	// aggregation.field задаёт поле, по которому считаются отдельные счётчики.
+	// Например, field="pc_name" → отдельный счётчик на каждый хост.
+	// Если field пустой — один глобальный счётчик для всего правила.
+
+	var groupKey string
+	if rule.Aggregation.Field != "" {
+		groupValue := e.getFieldValue(rule.Aggregation.Field, normLog)
+		if groupValue == nil {
+			// Поле есть в правиле, но не найдено в событии — пропускаем.
+			log.Printf("Rule %q: aggregation field %q not found in event, skipping", rule.Name, rule.Aggregation.Field)
+			return nil
+		}
+		groupKey = fmt.Sprintf("%s:%v", rule.Aggregation.Field, groupValue)
+	} else {
+		// Нет поля группировки — один счётчик на всё правило.
+		groupKey = "global"
+	}
+
+	// ── Инкрементируем счётчик ────────────────────────────────────────────────
+
+	st, err := e.stateStore.IncrementCounter(ctx, rule.ID, groupKey, window)
 	if err != nil {
-		return fmt.Errorf("failed to increment counter: %v", err)
+		return fmt.Errorf("rule %q: failed to increment counter: %w", rule.Name, err)
 	}
 
-	log.Printf("Rule %s: %s counter = %d/%d", rule.ID, groupKey, state.Counter, rule.Aggregation.Threshold)
+	log.Printf("[aggregation] rule=%q key=%q counter=%d/%d window=%s",
+		rule.Name, groupKey, st.Counter, rule.Aggregation.Threshold, rule.Aggregation.TimeWindow)
 
-	// Проверяем порог
-	if state.Counter >= rule.Aggregation.Threshold {
-		// Триггерим правило
+	// ── Проверяем порог ───────────────────────────────────────────────────────
+
+	if st.Counter >= rule.Aggregation.Threshold {
 		stateData := map[string]interface{}{
-			"counter":    state.Counter,
-			"first_seen": state.FirstSeen,
-			"last_seen":  state.LastSeen,
+			"counter":    st.Counter,
+			"threshold":  rule.Aggregation.Threshold,
 			"group_key":  groupKey,
+			"field":      rule.Aggregation.Field,
+			"first_seen": st.FirstSeen,
+			"last_seen":  st.LastSeen,
+			"window":     rule.Aggregation.TimeWindow,
 		}
 
-		// Сбрасываем счетчик чтобы не триггерить повторно
-		e.stateStore.DeleteState(ctx, rule.ID, groupKey)
+		// Сбрасываем счётчик до срабатывания следующего алёрта.
+		if err := e.stateStore.DeleteState(ctx, rule.ID, groupKey); err != nil {
+			log.Printf("Rule %q: failed to reset state: %v", rule.Name, err)
+		}
 
 		return e.triggerRule(ctx, rule, normLog, stateData)
 	}

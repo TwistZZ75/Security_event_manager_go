@@ -99,8 +99,9 @@ export async function getAction(id: string): Promise<Action> {
 }
 
 // Events
-export async function getEvents(): Promise<NormalizedEvent[]> {
-  const data = await request<NormalizedEvent[] | null>('/events');
+export async function getEvents(limit?: number): Promise<NormalizedEvent[]> {
+  const url = limit ? `/events?limit=${limit}` : '/events';
+  const data = await request<NormalizedEvent[] | null>(url);
   return data ?? [];
 }
 

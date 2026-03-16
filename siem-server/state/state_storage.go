@@ -111,14 +111,21 @@ func (ss *StateStorage) SaveState(ctx context.Context, state *RuleState) error {
 	return nil
 }
 
-// увеличивает счетчик для состояния правила
-// Если состояние не существует, создает новое
-// Возвращает обновленное состояние
+// IncrementCounter атомарно увеличивает счётчик для (ruleID, groupKey).
+//
+// Логика временного окна:
+//   - Если запись не существует — создаётся новая: counter=1, первое окно.
+//   - Если запись существует И окно ещё не истекло (expires_at >= NOW) —
+//     счётчик увеличивается, expires_at НЕ меняется (окно фиксировано с первого события).
+//   - Если запись существует, но окно уже истекло (expires_at < NOW) —
+//     счётчик сбрасывается в 1, first_seen и expires_at обновляются (новое окно).
+//
+// Это реализует «tumbling window»: окно открывается первым событием и закрывается
+// через time_window. Все события в этом промежутке считаются вместе.
 func (ss *StateStorage) IncrementCounter(ctx context.Context, ruleID, groupKey string, window time.Duration) (*RuleState, error) {
 	now := time.Now()
 	expiresAt := now.Add(window)
 
-	// Используем upsert с INCREMENT
 	query := `
 		INSERT INTO rule_state (
 			rule_id,
@@ -130,35 +137,43 @@ func (ss *StateStorage) IncrementCounter(ctx context.Context, ruleID, groupKey s
 			expires_at
 		) VALUES ($1, $2, 1, $3, $3, '{}'::jsonb, $4)
 		ON CONFLICT (rule_id, group_key) DO UPDATE SET
-			counter = rule_state.counter + 1,
+			-- Если окно уже истекло — сбрасываем счётчик и открываем новое окно.
+			-- Если окно ещё активно — просто инкрементируем счётчик.
+			counter = CASE
+				WHEN rule_state.expires_at < $3 THEN 1
+				ELSE rule_state.counter + 1
+			END,
+			first_seen = CASE
+				WHEN rule_state.expires_at < $3 THEN $3
+				ELSE rule_state.first_seen
+			END,
 			last_seen = $3,
-			expires_at = $4
+			-- expires_at фиксируется при открытии окна и не сдвигается.
+			-- При просроченном окне — открываем новое с текущего момента.
+			expires_at = CASE
+				WHEN rule_state.expires_at < $3 THEN $4
+				ELSE rule_state.expires_at
+			END
 		RETURNING id, counter, first_seen, last_seen, expires_at
 	`
 
-	var state RuleState
-	state.RuleID = ruleID
-	state.GroupKey = groupKey
-	state.StateData = make(map[string]interface{})
+	var st RuleState
+	st.RuleID = ruleID
+	st.GroupKey = groupKey
+	st.StateData = make(map[string]interface{})
 
-	err := ss.pool.QueryRow(ctx, query,
-		ruleID,
-		groupKey,
-		now,
-		expiresAt,
-	).Scan(
-		&state.ID,
-		&state.Counter,
-		&state.FirstSeen,
-		&state.LastSeen,
-		&state.ExpiresAt,
+	err := ss.pool.QueryRow(ctx, query, ruleID, groupKey, now, expiresAt).Scan(
+		&st.ID,
+		&st.Counter,
+		&st.FirstSeen,
+		&st.LastSeen,
+		&st.ExpiresAt,
 	)
-
 	if err != nil {
-		return nil, fmt.Errorf("failed to increment counter: %v", err)
+		return nil, fmt.Errorf("failed to increment counter: %w", err)
 	}
 
-	return &state, nil
+	return &st, nil
 }
 
 // возвращает все состояния для конкретного правила

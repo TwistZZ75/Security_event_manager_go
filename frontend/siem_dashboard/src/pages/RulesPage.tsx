@@ -4,6 +4,7 @@ import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveCo
 import { BookOpen, Plus, AlertTriangle, Pencil, Trash2, ToggleLeft, ToggleRight, X } from 'lucide-react';
 import { getRules, deleteRule, setRuleEnabled } from '../api/api';
 import type { Rule } from '../types';
+import {parseDate } from '../utils/date';
 import StatCard from '../components/StatCard';
 import PaginatedTable from '../components/PaginatedTable';
 import SeverityBadge from '../components/SeverityBadge';
@@ -77,6 +78,7 @@ export default function RulesPage() {
     {
       key: 'name',
       header: 'Rule Name',
+      sortValue: (row: Rule) => row.name,
       render: (r: Rule) => (
         <div>
           <div style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '13px' }}>{r.name}</div>
@@ -93,19 +95,21 @@ export default function RulesPage() {
     {
       key: 'severity',
       header: 'Severity',
-      width: '110px',
+      width: '120px',
+      sortValue: (row: Rule) => ['critical','high','medium','low'].indexOf(row.severity),
       render: (r: Rule) => <SeverityBadge severity={r.severity} />,
     },
     {
       key: 'status',
       header: 'Status',
-      width: '110px',
+      width: '120px',
       render: (r: Rule) => <StatusBadge status={r.enabled ? 'enabled' : 'disabled'} />,
     },
     {
       key: 'triggers',
       header: 'Triggers',
-      width: '90px',
+      width: '120px',
+      sortValue: (row: Rule) => row.trigger_count ?? 0,
       render: (r: Rule) => (
         <span style={{ fontFamily: 'var(--font-mono)', fontSize: '13px', color: (r.trigger_count ?? 0) > 0 ? 'var(--mint)' : 'var(--text-secondary)' }}>
           {r.trigger_count ?? 0}
@@ -115,6 +119,8 @@ export default function RulesPage() {
     {
       key: 'created_at',
       header: 'Created',
+      width: 'auto',
+      sortValue: (row: Rule) => parseDate(row.created_at) ?? new Date(0),
       render: (r: Rule) => (
         <span style={{ color: 'var(--text-secondary)', fontSize: '11px' }}>
           {formatDate(r.created_at)}
@@ -124,7 +130,7 @@ export default function RulesPage() {
     {
       key: 'actions_col',
       header: 'Actions',
-      width: '110px',
+      width: '150px',
       render: (r: Rule) => (
         <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }} onClick={e => e.stopPropagation()}>
           {/* Toggle enable/disable */}

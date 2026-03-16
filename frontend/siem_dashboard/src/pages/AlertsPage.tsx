@@ -3,6 +3,7 @@ import { PieChart, Pie, Cell, AreaChart, Area, XAxis, YAxis, Tooltip, Responsive
 import { Bell, AlertTriangle, CheckCircle, Clock, XCircle, RotateCcw } from 'lucide-react';
 import { getAlerts, updateAlertStatus } from '../api/api';
 import { useAuth } from '../contexts/AuthContext';
+import { fmtDate, parseDate } from '../utils/date';
 import type { Alert } from '../types';
 import StatCard from '../components/StatCard';
 import PaginatedTable from '../components/PaginatedTable';
@@ -13,16 +14,21 @@ import PieLegend from '../components/PieLegend';
 import JsonModal from '../components/JsonModal';
 
 const SEV_ORDER = ['critical', 'high', 'medium', 'low'];
-const SEV_COLORS: Record<string, string> = { critical: '#ff3055', high: '#ff5f6d', medium: '#ffa94d', low: '#C3FDB8' };
+const SEV_COLORS: Record<string, string> = {
+  critical: '#ff3055', high: '#ff5f6d', medium: '#ffa94d', low: '#C3FDB8',
+};
+
+// Статусы которые считаются «закрытыми» (resolved + false_positive)
+const isResolved = (s: string) => s === 'resolved' || s === 'false_positive';
 
 export default function AlertsPage() {
-  const { username } = useAuth();   
+  const { username } = useAuth();                         // ← текущий пользователь
+
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [selected, setSelected] = useState<Alert | null>(null);
 
-  // alert status form state
   const [statusChoice, setStatusChoice] = useState<string>('');
   const [notes, setNotes] = useState('');
   const [sending, setSending] = useState(false);
@@ -31,7 +37,7 @@ export default function AlertsPage() {
   const loadAlerts = () => {
     setLoading(true);
     getAlerts()
-      .then(setAlerts)
+      .then(data => setAlerts(data ?? []))
       .catch(e => setError(e.message))
       .finally(() => setLoading(false));
   };
@@ -45,15 +51,15 @@ export default function AlertsPage() {
     setSendError('');
   };
 
-  const closeModal = () => { setSelected(null); };
+  const closeModal = () => setSelected(null);
 
   const handleSend = async () => {
     if (!selected || !statusChoice) return;
     setSending(true);
     setSendError('');
     try {
+      // передаём текущего пользователя на бэк
       await updateAlertStatus(selected.id, statusChoice, notes);
-      // update local state
       setAlerts(prev =>
         prev.map(a => a.id === selected.id ? { ...a, status: statusChoice as Alert['status'] } : a)
       );
@@ -65,34 +71,54 @@ export default function AlertsPage() {
     }
   };
 
+  // ── Статистика ──────────────────────────────────────────────────────────
   const critical = alerts.filter(a => a.severity === 'critical').length;
   const open     = alerts.filter(a => a.status === 'open').length;
-  const resolved = alerts.filter(a => a.status === 'resolved').length + alerts.filter(a=>a.status === 'false_positive').length;
+  // false_positive считается как resolved (пункт 3)
+  const resolved = alerts.filter(a => isResolved(a.status)).length;
 
   const pieData = SEV_ORDER
     .map(s => ({ name: s, value: alerts.filter(a => a.severity === s).length, color: SEV_COLORS[s] }))
     .filter(d => d.value > 0);
 
-  // last 24h hourly buckets
+  // last 24h hourly
   const now = Date.now();
   const buckets: Record<number, number> = {};
-  for (let i = 23; i >= 0; i--) buckets[i] = 0;
+  for (let i = 0; i < 24; i++) buckets[i] = 0;
   alerts.forEach(a => {
-    const diff = Math.floor((now - new Date(a.created_at).getTime()) / 3600000);
-    if (diff >= 0 && diff < 24) buckets[23 - diff] = (buckets[23 - diff] || 0) + 1;
+    const diff = Math.floor((now - new Date(a.created_at).getTime()) / 3_600_000);
+    if (diff >= 0 && diff < 24) buckets[23 - diff]++;
   });
-  const areaData = Array.from({ length: 24 }, (_, i) => ({ h: `${i}h`, count: buckets[i] || 0 }));
+  const areaData = Array.from({ length: 24 }, (_, i) => ({ h: `${i}h`, count: buckets[i] }));
 
   const sortedAlerts = [...alerts].sort((a, b) => {
     const si = (s: string) => SEV_ORDER.indexOf(s);
     if (si(a.severity) !== si(b.severity)) return si(a.severity) - si(b.severity);
-    return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+    return parseDate(a.created_at).getTime() - parseDate(b.created_at).getTime();
   });
 
+  // ── Опции статусов ──────────────────────────────────────────────────────
+  // Пункт 1: если алёрт не open — показываем «Reopen» вместо/вместе с остальными
+  const STATUS_OPTIONS_ACTIVE = [
+    { value: 'acknowledged',   label: 'Acknowledge' },
+    { value: 'resolved',       label: 'Mark as Resolved' },
+    { value: 'false_positive', label: 'Mark as False Positive' },
+  ];
+  const STATUS_OPTIONS_CLOSED = [
+    { value: 'open',           label: 'Reopen (set back to Open)', icon: <RotateCcw size={12} /> },
+    { value: 'resolved',       label: 'Mark as Resolved' },
+    { value: 'false_positive', label: 'Mark as False Positive' },
+  ];
+
+  const statusOptions = selected && selected.status !== 'open'
+    ? STATUS_OPTIONS_CLOSED
+    : STATUS_OPTIONS_ACTIVE;
+
+  // ── Колонки таблицы ─────────────────────────────────────────────────────
   const columns = [
     { key: 'id', header: 'ID', width: '60px',
       render: (a: Alert) => <span style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)', fontSize: '12px' }}>#{a.id}</span> },
-    { key: 'severity', header: 'Severity', width: '110px',
+    { key: 'severity', header: 'Severity', width: '110px', sortValue: (a: Alert) => ['critical','high','medium','low'].indexOf(a.severity),
       render: (a: Alert) => <SeverityBadge severity={a.severity} /> },
     { key: 'title', header: 'Title',
       render: (a: Alert) => (
@@ -102,37 +128,20 @@ export default function AlertsPage() {
         </div>
       ) },
     { key: 'status', header: 'Status', width: '130px',
+      sortValue: (a: Alert) => ['open', 'acknowledged', 'resolved', 'false_positive'].indexOf(a.status),
       render: (a: Alert) => <StatusBadge status={a.status} /> },
     { key: 'created_at', header: 'Created',
-      render: (a: Alert) => <span style={{ color: 'var(--text-secondary)', fontSize: '11px' }}>{fmt(a.created_at)}</span> },
+      render: (a: Alert) => <span style={{ color: 'var(--text-secondary)', fontSize: '11px' }}>{fmt(a.created_at)}</span>,
+      sortValue: (a: Alert) => parseDate(a.created_at) },
   ];
 
-  const customTooltip = ({ active, payload }: { active?: boolean; payload?: Array<{ name: string; value: number; payload: { color?: string } }> }) => {
-    if (!active || !payload?.length) return null;
-    return (
-      <div style={{ background: 'var(--navy-light)', border: '1px solid var(--navy-border)', borderRadius: '8px', padding: '10px 14px', fontFamily: 'var(--font-mono)', fontSize: '12px' }}>
-        <div style={{ color: payload[0].payload.color || 'var(--mint)', fontWeight: 700 }}>{payload[0].name}</div>
-        <div>{payload[0].value}</div>
-      </div>
-    );
-  };
-
-  const STATUS_OPTIONS = [
-    { value: 'open',          label: 'Close (reopen as open)' },
-    { value: 'acknowledged',  label: 'Acknowledge' },
-    { value: 'resolved',      label: 'Mark as Resolved' },
-    { value: 'false_positive',label: 'Mark as False Positive' },
-  ];
-
+  // ── Footer модала ────────────────────────────────────────────────────────
   const alertModalFooter = selected && (
     <div style={{ padding: '20px 22px' }}>
-      {/* Radio buttons */}
       <div style={{ marginBottom: '14px' }}>
-        <div style={{ fontSize: '11px', fontFamily: 'var(--font-display)', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '10px' }}>
-          Change Status
-        </div>
+        <div style={sectionLabel}>Change Status</div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          {STATUS_OPTIONS.map(opt => (
+          {statusOptions.map(opt => (
             <label key={opt.value} style={{ display: 'flex', alignItems: 'center', gap: '9px', cursor: 'pointer', fontSize: '13px', fontFamily: 'var(--font-display)' }}>
               <input
                 type="radio"
@@ -142,7 +151,8 @@ export default function AlertsPage() {
                 onChange={() => setStatusChoice(opt.value)}
                 style={{ accentColor: 'var(--mint)', width: '15px', height: '15px', cursor: 'pointer' }}
               />
-              <span style={{ color: statusChoice === opt.value ? 'var(--mint)' : 'var(--text-secondary)' }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: '5px', color: statusChoice === opt.value ? 'var(--mint)' : 'var(--text-secondary)' }}>
+                {('icon' in opt && opt.icon) as React.ReactNode}
                 {opt.label}
               </span>
             </label>
@@ -150,15 +160,12 @@ export default function AlertsPage() {
         </div>
       </div>
 
-      {/* Notes */}
       <div style={{ marginBottom: '14px' }}>
-        <div style={{ fontSize: '11px', fontFamily: 'var(--font-display)', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '8px' }}>
-          Notes
-        </div>
+        <div style={sectionLabel}>Notes</div>
         <textarea
           value={notes}
           onChange={e => setNotes(e.target.value)}
-          placeholder="Optional notes about this status change..."
+          placeholder="Optional notes..."
           rows={3}
           style={{
             width: '100%', boxSizing: 'border-box',
@@ -170,20 +177,24 @@ export default function AlertsPage() {
         />
       </div>
 
+      {username && (
+        <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '10px', fontFamily: 'var(--font-mono)' }}>
+          Will be recorded as: <span style={{ color: 'var(--mint)' }}>{username}</span>
+        </div>
+      )}
+
       {sendError && (
         <div style={{ color: '#ff5f6d', fontSize: '12px', marginBottom: '10px', display: 'flex', gap: '6px', alignItems: 'center' }}>
           <AlertTriangle size={12} /> {sendError}
         </div>
       )}
 
-      {/* Send button */}
       <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
         <button
           onClick={handleSend}
           disabled={!statusChoice || sending}
           style={{
-            display: 'flex', alignItems: 'center', gap: '7px',
-            padding: '9px 20px', borderRadius: '9px', border: 'none',
+            padding: '9px 22px', borderRadius: '9px', border: 'none',
             background: (!statusChoice || sending) ? 'var(--navy-border)' : 'var(--mint)',
             color: (!statusChoice || sending) ? 'var(--text-secondary)' : 'var(--navy)',
             fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: '13px',
@@ -191,12 +202,25 @@ export default function AlertsPage() {
             transition: 'background var(--transition)',
           }}
         >
-          {sending ? 'Sending...' : 'Send'}
+          {sending ? 'Sending…' : 'Send'}
         </button>
       </div>
     </div>
   );
 
+  // ── Tooltip ──────────────────────────────────────────────────────────────
+  const customTooltip = ({ active, payload }: { active?: boolean; payload?: Array<{ name: string; value: number; payload: { color?: string } }> }) => {
+    if (!active || !payload?.length) return null;
+    const p = payload[0];
+    return (
+      <div style={tooltipStyle}>
+        <div style={{ color: p.payload.color || 'var(--mint)', fontWeight: 700 }}>{p.name}</div>
+        <div>{p.value}</div>
+      </div>
+    );
+  };
+
+  // ── Render ───────────────────────────────────────────────────────────────
   return (
     <div style={{ padding: '0 0 40px' }} className="animate-in">
       <PageHeader title="Alerts" subtitle="Security alerts and incidents" />
@@ -205,14 +229,13 @@ export default function AlertsPage() {
         {loading ? <Spinner label="alerts" /> : (
           <>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '14px', marginBottom: '28px' }}>
-              <StatCard label="Total"    value={alerts.length} icon={<Bell size={18} />}        accent="#C3FDB8" />
+              <StatCard label="Total"    value={alerts.length} icon={<Bell size={18} />}         accent="#C3FDB8" />
               <StatCard label="Critical" value={critical}      icon={<AlertTriangle size={18} />} accent="#ff3055" />
-              <StatCard label="Open"     value={open}          icon={<Clock size={18} />}        accent="#ffa94d" />
-              <StatCard label="Resolved" value={resolved}      icon={<CheckCircle size={18} />} accent="#C3FDB8" />
+              <StatCard label="Open"     value={open}          icon={<Clock size={18} />}         accent="#ffa94d" />
+              <StatCard label="Resolved" value={resolved}      icon={<CheckCircle size={18} />}  accent="#C3FDB8" sub="incl. false positives" />
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.6fr', gap: '20px', marginBottom: '28px' }}>
-              {/* Pie + legend */}
               <div style={card}>
                 <h3 style={cardTitle}>By Severity</h3>
                 <div style={{ display: 'flex', gap: '16px', alignItems: 'center', flexWrap: 'wrap' }}>
@@ -234,7 +257,6 @@ export default function AlertsPage() {
                 </div>
               </div>
 
-              {/* Area chart */}
               <div style={card}>
                 <h3 style={cardTitle}>Last 24h</h3>
                 <ResponsiveContainer width="100%" height={200}>
@@ -277,11 +299,8 @@ export default function AlertsPage() {
   );
 }
 
-function fmt(s?: string) {
-  if (!s) return '—';
-  const d = new Date(s);
-  return isNaN(d.getTime()) ? '—' : d.toLocaleString();
-}
+// ── Helpers ──────────────────────────────────────────────────────────────────
+function fmt(s?: string) { return fmtDate(s ?? undefined); }
 
 function ErrorBox({ msg }: { msg: string }) {
   return (
@@ -299,6 +318,11 @@ function Spinner({ label }: { label: string }) {
     </div>
   );
 }
-function EmptyChart() { return <div style={{ height: '160px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary)', fontSize: '13px' }}>No data</div>; }
+function EmptyChart() {
+  return <div style={{ height: '160px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary)', fontSize: '13px' }}>No data</div>;
+}
+
 const card: React.CSSProperties = { background: 'var(--navy-light)', border: '1px solid var(--navy-border)', borderRadius: '12px', padding: '20px' };
 const cardTitle: React.CSSProperties = { fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '14px', marginBottom: '14px', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.08em' };
+const sectionLabel: React.CSSProperties = { fontSize: '11px', fontFamily: 'var(--font-display)', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '10px' };
+const tooltipStyle: React.CSSProperties = { background: 'var(--navy-light)', border: '1px solid var(--navy-border)', borderRadius: '8px', padding: '10px 14px', fontFamily: 'var(--font-mono)', fontSize: '12px' };

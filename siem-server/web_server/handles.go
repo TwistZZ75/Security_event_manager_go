@@ -4,7 +4,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"log"
 	"net/http"
+	logstructure "siem-server/internal/logsstructure"
 	"siem-server/rules"
 	"strconv"
 	"time"
@@ -334,12 +336,28 @@ func respondWithError(w http.ResponseWriter, code int, message string) {
 func (ws *WebServer) handleGetEvents(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	logs, err := ws.LogStorage.GetRecent(ctx, 500)
+	// Читаем ?limit=N
+	limit := 500
+	if lStr := r.URL.Query().Get("limit"); lStr != "" {
+		if n, err := strconv.Atoi(lStr); err == nil && n > 0 {
+			if n > 10000 {
+				n = 10000 // защита от слишком большого запроса
+			}
+			limit = n
+		}
+	}
+
+	logs, err := ws.LogStorage.GetRecent(ctx, limit)
 	if err != nil {
+		log.Printf("handleGetEvents: %v", err)
 		respondWithError(w, http.StatusInternalServerError, "Failed to fetch events")
 		return
 	}
+	if logs == nil {
+		logs = []*logstructure.NormalizedLog{}
+	}
 
+	// Маппинг в Event для фронтенда
 	type Event struct {
 		ID               string `json:"id"`
 		PCName           string `json:"pc_name"`
@@ -351,6 +369,7 @@ func (ws *WebServer) handleGetEvents(w http.ResponseWriter, r *http.Request) {
 		Timestamp        string `json:"timestamp"`
 		OS               string `json:"os"`
 		Source           string `json:"source"`
+		RawLog           string `json:"raw_log"`
 	}
 
 	events := make([]Event, 0, len(logs))
@@ -366,6 +385,7 @@ func (ws *WebServer) handleGetEvents(w http.ResponseWriter, r *http.Request) {
 			Timestamp:        l.Timestamp.Format(time.RFC3339),
 			OS:               l.OS,
 			Source:           l.Source,
+			RawLog:           l.Raw_log,
 		})
 	}
 

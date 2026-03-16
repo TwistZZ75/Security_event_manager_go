@@ -18,9 +18,9 @@ const DEFAULT_RULE = {
   ],
   aggregation: {
     type: "count",
+    field: "username",
     threshold: 5,
-    time_window: "5m",
-    group_by: ["username"]
+    time_window: "5m"
   },
   actions: [
     {
@@ -104,7 +104,7 @@ Use {{field_name}} in parameters to interpolate event fields, e.g. {{username}}.
 
 ## Tips
 - Always test rules with "enabled": false first
-- Use group_by in aggregation to correlate per-user or per-host
+- Use "field" in aggregation to group counts per-user or per-host (e.g. "field": "username")
 - Keep conditions specific to reduce false positives
 `;
 
@@ -166,7 +166,13 @@ export default function CreateRulePage() {
       setSaved(true);
       setTimeout(() => navigate('/rules'), 1200);
     } catch (e) {
-      setSaveError(e instanceof Error ? e.message : 'Save failed');
+      const msg = e instanceof Error ? e.message : 'Save failed';
+      // Бэкенд возвращает текст ошибки в message поле или в теле ответа
+      if (msg.toLowerCase().includes('already exists') || msg.toLowerCase().includes('duplicate')) {
+        setSaveError(`A rule named "${(() => { try { return JSON.parse(json).name ?? ''; } catch { return ''; } })()}" already exists. Please choose a different name.`);
+      } else {
+        setSaveError(msg);
+      }
     } finally {
       setSaving(false);
     }

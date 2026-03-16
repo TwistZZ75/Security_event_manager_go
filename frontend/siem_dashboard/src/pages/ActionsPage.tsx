@@ -13,6 +13,7 @@ import StatCard from '../components/StatCard';
 import PaginatedTable from '../components/PaginatedTable';
 import StatusBadge from '../components/StatusBadge';
 import PageHeader from '../components/PageHeader';
+import { fmtDate, parseDate } from '../utils/date';
 import PieLegend from '../components/PieLegend';
 import JsonModal from '../components/JsonModal';
 import AgentMiniModal from '../components/AgentMiniModal';
@@ -69,7 +70,7 @@ export default function ActionsPage() {
   const TYPE_COLORS = ['#C3FDB8','#a0e095','#64b4ff','#ffa94d','#b47cff','#ff5f6d','#ffe066','#ff8800','#00e5ff'];
 
   const sortedActions = [...actions].sort((a, b) =>
-    new Date(b.executed_at).getTime() - new Date(a.executed_at).getTime()
+    parseDate(b.executed_at).getTime() - parseDate(a.executed_at).getTime()
   );
 
   // ── Row click ─────────────────────────────────────────────────────────────
@@ -126,6 +127,7 @@ export default function ActionsPage() {
     },
     {
       key: 'type', header: 'Type',
+      sortValue: (row: Action) => row.action_type,
       render: (a: Action) => {
         const isBlock = !!UNBLOCK_MAP[a.action_type];
         return (
@@ -142,10 +144,12 @@ export default function ActionsPage() {
     },
     {
       key: 'status', header: 'Status', width: '120px',
+      sortValue: (row: Action) => ['failed', 'pending', 'success', ].indexOf(row.status),
       render: (a: Action) => <StatusBadge status={a.status} />,
     },
     {
       key: 'target', header: 'Target',
+      sortValue: (row: Action) => row.target,
       render: (a: Action) => {
         const hasTarget = !!a.target;
         return (
@@ -174,7 +178,15 @@ export default function ActionsPage() {
     {
       key: 'result', header: 'Result',
       render: (a: Action) => (
-        <span style={{ fontSize: '12px' }}>
+        <span
+      style={{
+        fontSize: '12px',
+        display: 'block',
+        maxWidth: '300px',        // максимальная ширина содержимого
+        overflow: 'hidden',       // обрезаем что не влезает
+        whiteSpace: 'nowrap',     // запрещаем перенос строки
+      }}
+    >
           {a.error
             ? <span style={{ color: '#ff5f6d' }}>{a.error}</span>
             : <span style={{ color: 'var(--text-secondary)' }}>{a.result || '—'}</span>}
@@ -183,6 +195,7 @@ export default function ActionsPage() {
     },
     {
       key: 'executed_at', header: 'Executed At',
+      sortValue: (a: Action) => parseDate(a.executed_at),
       render: (a: Action) => (
         <span style={{ color: 'var(--text-secondary)', fontSize: '12px' }}>{fmt(a.executed_at)}</span>
       ),
@@ -195,7 +208,7 @@ export default function ActionsPage() {
 
   const actionModalFooter = selectedAction && unblockInfo ? (
     <div style={{ padding: '18px 22px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-      <div style={{ fontSize: '11px', color: 'var(--text-secondary)', fontFamily: 'var(--font-display)', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 700 }}>
+      <div style={{ fontSize: '11px', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 700 }}>
         Remediation
       </div>
 
@@ -218,10 +231,10 @@ export default function ActionsPage() {
           disabled={unblocking}
           style={{
             display: 'flex', alignItems: 'center', gap: '7px',
-            padding: '9px 20px', borderRadius: '9px', border: 'none',
+            padding: '9px 20px', borderRadius: '9px',
             background: unblocking ? 'var(--navy-border)' : 'rgba(255,95,109,0.15)',
             color: unblocking ? 'var(--text-secondary)' : '#ff5f6d',
-            fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: '13px',
+            fontFamily: 'var(--font-mono)', fontWeight: 800, fontSize: '13px',
             cursor: unblocking ? 'not-allowed' : 'pointer',
             transition: 'background var(--transition)',
             border: '1px solid rgba(255,95,109,0.3)',
@@ -302,7 +315,7 @@ export default function ActionsPage() {
             </div>
 
             <div>
-              <h2 style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '16px', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <h2 style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: '16px', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <Zap size={16} /> Action Log
                 <span style={{ fontSize: '11px', fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)', fontWeight: 400, marginLeft: '4px' }}>
                   — click row to view details
@@ -355,11 +368,7 @@ export default function ActionsPage() {
   );
 }
 
-function fmt(s?: string) {
-  if (!s) return '—';
-  const d = new Date(s);
-  return isNaN(d.getTime()) ? '—' : d.toLocaleString();
-}
+function fmt(s?: string) { return fmtDate(s ?? undefined); }
 function EmptyChart() { return <div style={{ height: '160px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary)', fontSize: '13px' }}>No data</div>; }
 function ErrorBox({ msg }: { msg: string }) {
   return (
