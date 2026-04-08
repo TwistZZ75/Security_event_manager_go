@@ -125,7 +125,7 @@ func (a *Agent) logError(format string, v ...interface{}) {
 	log.Printf("[ERROR] "+format, v...)
 }
 
-// getLocalIP получает локальный IP адрес (упрощённо)
+// getLocalIP получает локальный IP адрес
 func getLocalIP() string {
 	cfg := &config.Config{}
 	agent_interface := cfg.Agent.Interface

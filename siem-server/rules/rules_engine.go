@@ -156,8 +156,8 @@ func (e *Engine) checkCondition(cond Condition, normLog *logstructure.Normalized
 	// ── in / not_in ────────────────────────────────────────────────────────
 	//
 	// cond.Value может прийти как:
-	//   []interface{}{"Logon Failure", "SSH Auth Failure"}  ← из JSON (SaveRule)
-	//   []string{"Logon Failure", "SSH Auth Failure"}       ← из кода
+	//   []interface{}{"Logon Failure", "SSH Auth Failure"} из JSON (SaveRule)
+	//   []string{"Logon Failure", "SSH Auth Failure"} из кода
 	//
 	// Сравнение регистронезависимое.
 
@@ -260,7 +260,7 @@ func (e *Engine) checkCondition(cond Condition, normLog *logstructure.Normalized
 }
 
 // =============================================================================
-// Вспомогательные функции (добавить в тот же файл rules_engine.go)
+// Вспомогательные функции
 // =============================================================================
 
 // toStringSlice преобразует interface{} в []string.

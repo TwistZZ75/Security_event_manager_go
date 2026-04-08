@@ -16,15 +16,6 @@ type RuleStorage struct {
 	pool *pgxpool.Pool
 }
 
-// type RuleStorageInterface interface {
-// 	AddRule(ctx context.Context, rule *Rule) error
-// 	RemoveRule(ctx context.Context, ruleId string) error
-// 	UpdateRule(ctx context.Context, rule *Rule) error
-// 	GetAllRules(ctx context.Context) ([]*Rule, error)
-// 	GetRule(ctx context.Context, ruleId string) (*Rule, error)
-// 	GetRulesCount() (int, error)
-// }
-
 // конструктор
 func NewRuleStorage(pool *pgxpool.Pool) *RuleStorage {
 	return &RuleStorage{pool: pool}

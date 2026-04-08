@@ -29,28 +29,6 @@ type LoginResponse struct {
 	Message string `json:"message,omitempty"`
 }
 
-func (ws *WebServer) handleLogin(w http.ResponseWriter, r *http.Request) {
-	var req LoginRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respondWithError(w, http.StatusBadRequest, "Invalid request")
-		return
-	}
-
-	// TODO: Implement proper authentication
-	if req.Username == "admin" && req.Password == "admin" {
-		respondWithJSON(w, http.StatusOK, LoginResponse{
-			Success: true,
-			Token:   "dummy-token-" + time.Now().Format("20060102150405"),
-			Message: "Login successful",
-		})
-	} else {
-		respondWithJSON(w, http.StatusUnauthorized, LoginResponse{
-			Success: false,
-			Message: "Invalid credentials",
-		})
-	}
-}
-
 // ============================================================================
 // HANDLERS - AGENTS
 // ============================================================================
@@ -113,30 +91,29 @@ func (ws *WebServer) handleGetAlert(w http.ResponseWriter, r *http.Request) {
 
 func (ws *WebServer) handleUpdateAlertStatus(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
-	alertIDStr := vars["id"]
-
-	alertID, err := strconv.ParseInt(alertIDStr, 10, 64)
+	alertID, err := strconv.ParseInt(vars["id"], 10, 64)
 	if err != nil {
 		respondWithError(w, http.StatusBadRequest, "Invalid alert ID")
 		return
 	}
 
 	var body struct {
-		Status    string `json:"status"`
-		Notes     string `json:"notes"`
-		UpdatedBy string `json:"updated_by"`
+		Status string `json:"status"`
+		Notes  string `json:"notes"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		respondWithError(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
-	//если фронт не передал пользователя
-	if body.UpdatedBy == "" {
-		body.UpdatedBy = "web"
+
+	// НОВОЕ: берём имя пользователя из контекста (кладётся middleware)
+	updatedBy, _ := GetUsername(r.Context())
+	if updatedBy == "" {
+		updatedBy = "web"
 	}
 
 	ctx := r.Context()
-	if err := ws.alertStorage.UpdateAlert(ctx, alertID, body.Status, "web", body.Notes); err != nil {
+	if err := ws.alertStorage.UpdateAlert(ctx, alertID, body.Status, updatedBy, body.Notes); err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Failed to update alert")
 		return
 	}
@@ -144,7 +121,7 @@ func (ws *WebServer) handleUpdateAlertStatus(w http.ResponseWriter, r *http.Requ
 	respondWithJSON(w, http.StatusOK, map[string]interface{}{
 		"id":         alertID,
 		"status":     body.Status,
-		"updated_by": body.UpdatedBy,
+		"updated_by": updatedBy,
 	})
 }
 

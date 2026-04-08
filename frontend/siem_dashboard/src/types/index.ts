@@ -1,5 +1,43 @@
 // ============================
-// Agent Types
+// Пользователи и аутентификация
+// ============================
+export type UserRole = 'admin' | 'analyst' | 'viewer';
+
+export interface SafeUser {
+  id: number;
+  username: string;
+  email: string;
+  role: UserRole;
+  is_active: boolean;
+  created_at: string;
+  last_login_at?: string;
+}
+
+export interface TokenPair {
+  access_token: string;
+  refresh_token: string;
+  expires_in: number;
+  user: SafeUser;
+}
+
+export interface LoginRequest {
+  username: string;
+  password: string;
+}
+
+export interface RegisterRequest {
+  username: string;
+  email: string;
+  password: string;
+  role?: UserRole;
+}
+
+export interface RefreshRequest {
+  refresh_token: string;
+}
+
+// ============================
+// Агенты
 // ============================
 export interface Agent {
   ID: number;
@@ -16,7 +54,7 @@ export interface Agent {
 }
 
 // ============================
-// Alert Types
+// Алерты
 // ============================
 export type AlertSeverity = 'low' | 'medium' | 'high' | 'critical';
 export type AlertStatus = 'open' | 'acknowledged' | 'resolved' | 'false_positive';
@@ -40,7 +78,7 @@ export interface Alert {
 }
 
 // ============================
-// Action Types — matches server ActionLog struct
+// Действия
 // ============================
 export type ActionStatus = 'pending' | 'success' | 'failed';
 
@@ -57,7 +95,7 @@ export interface Action {
 }
 
 // ============================
-// Event Types (normalized_events)
+// События (normalized_events)
 // ============================
 export interface NormalizedEvent {
   id: string;
@@ -73,7 +111,7 @@ export interface NormalizedEvent {
 }
 
 // ============================
-// Rule Types
+// Правила
 // ============================
 export type RuleSeverity = 'low' | 'medium' | 'high' | 'critical';
 
@@ -114,18 +152,4 @@ export interface Rule {
   updated_by?: string;
   trigger_count?: number;
   last_triggered?: string;
-}
-
-// ============================
-// Auth Types
-// ============================
-export interface LoginRequest {
-  username: string;
-  password: string;
-}
-
-export interface LoginResponse {
-  success: boolean;
-  token?: string;
-  message?: string;
 }

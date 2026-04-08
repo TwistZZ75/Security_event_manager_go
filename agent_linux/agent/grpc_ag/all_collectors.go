@@ -31,7 +31,7 @@ func StartAllCollectors(ctx context.Context, cfg *config.Config) []collector.Log
 			collectors = append(collectors, squidcollector)
 		}
 	}
-	//запуск сбора логов sysmon
+	//запуск сбора логов syslog
 	if cfg.Collectors.Syslog.Enabled {
 		syslogcollector := collector.NewSyslogCollector(cfg.Collectors.Syslog.LogPath)
 		if err := syslogcollector.Start_collect(ctx); err != nil {

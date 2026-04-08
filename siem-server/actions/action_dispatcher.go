@@ -14,7 +14,7 @@ type Dispatcher struct {
 	executors map[string]Executor
 	actionLog ActionLogger
 	agentComm AgentCommunicator
-	notifier  *MultiNotifier // ← ДОБАВЛЕНО для уведомлений!
+	notifier  *MultiNotifier
 }
 
 // Executor интерфейс для выполнения действий

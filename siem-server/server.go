@@ -16,6 +16,7 @@ import (
 	"siem-server/proto/server/pkg/pb"
 	"siem-server/rules"
 	"siem-server/state"
+	"siem-server/users"
 	webserver "siem-server/web_server"
 	"syscall"
 	"time"
@@ -49,6 +50,11 @@ func main() {
 		log.Fatalf("Failed to ping database: %v", err)
 	}
 	log.Println("Connected to PostgreSQL")
+
+	// Инициализация системы пользователей
+	userStorage := users.NewUserStorage(pool)
+	jwtService := users.NewJWTService()
+	userHandler := users.NewHandler(userStorage, jwtService)
 
 	log.Println("Initializing storage layers...")
 
@@ -106,17 +112,26 @@ func main() {
 	logHandler := delivery.NewLogHandler(logProc)
 
 	webServer := webserver.NewWebServer(
-		agentStorage,
-		alertStorage,
-		actionStorage,
-		ruleStorage,
-		logStorage,
+		agentStorage, alertStorage, actionStorage, ruleStorage, logStorage,
+		userStorage, jwtService, userHandler,
 	)
 
 	// Запускаем веб-сервер в отдельной горутине
 	go func() {
 		if err := webServer.Start(":8080"); err != nil {
 			log.Fatalf("Web server failed: %v", err)
+		}
+	}()
+
+	// удаление истёкших refresh токенов (каждый час)
+	go func() {
+		ticker := time.NewTicker(1 * time.Hour)
+		defer ticker.Stop()
+		for range ticker.C {
+			_, err := pool.Exec(ctx, `DELETE FROM refresh_tokens WHERE expires_at < NOW()`)
+			if err != nil {
+				log.Printf("Failed to cleanup refresh tokens: %v", err)
+			}
 		}
 	}()
 
@@ -131,7 +146,7 @@ func main() {
 	// ============================================================================
 	log.Println("Starting background tasks...")
 
-	// Задача 1: Очистка истекших состояний (каждые 5 минут)
+	// Очистка истекших состояний (каждые 5 минут)
 	go func() {
 		ticker := time.NewTicker(5 * time.Minute)
 		defer ticker.Stop()
@@ -143,7 +158,7 @@ func main() {
 		}
 	}()
 
-	// Задача 2: Перезагрузка правил (каждые 5 минут)
+	// Перезагрузка правил (каждые 5 минут)
 	go func() {
 		ticker := time.NewTicker(5 * time.Minute)
 		defer ticker.Stop()

@@ -34,6 +34,9 @@ func main() {
 			}
 			fmt.Println("Service removed successfully")
 			return
+		default:
+			log.Println("Wrong argument.")
+			fmt.Println("Wrong argument. Argument can be `install` or `uninstall`/`remove`")
 		}
 	}
 
