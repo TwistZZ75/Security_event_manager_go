@@ -32,13 +32,52 @@ type Condition struct {
 
 // представляет агрегацию нескольких событий
 type Aggregation struct {
-	Type string `json:"type"` // count - посчитать количество событий
-	// sequence - последовательность событий (сначала A, потом B, потом C)
-	// threshold - порог по значению (например, сумма байт > n)
-	Field      string `json:"field,omitempty"`
-	Threshold  int    `json:"threshold"`
-	TimeWindow string `json:"time_window"`        // 5m, 1h, etc.
-	Operator   string `json:"operator,omitempty"` // sum, avg, max, min
+	// Тип агрегации: count | threshold | sequence
+	Type string `json:"type"`
+ 
+	// ── Общие поля ──────────────────────────────────────────────────────────
+ 
+	// Field — поле события для группировки (например "pc_name" или "username").
+	// Если пустое — один глобальный счётчик для всего правила.
+	Field string `json:"field,omitempty"`
+ 
+	// TimeWindow — ширина временного окна: "30s", "5m", "1h", "24h".
+	TimeWindow string `json:"time_window"`
+ 
+	// ── Поля для type=count ──────────────────────────────────────────────────
+ 
+	// Threshold — количество событий, при достижении которого правило срабатывает.
+	// Используется в type=count.
+	Threshold int `json:"threshold"`
+ 
+	// ── Поля для type=threshold ──────────────────────────────────────────────
+ 
+	// ValueField — поле события, из которого извлекается числовое значение.
+	// Поддерживается dot-нотация для JSON в raw_log: "raw_log.bytes_toserver".
+	// Для type=threshold и operator=distinct_count — поле для подсчёта уникальных значений.
+	ValueField string `json:"value_field,omitempty"`
+ 
+	// Operator — операция агрегации числовых значений:
+	//   sum           — сумма значений
+	//   max           — максимальное значение
+	//   avg           — среднее значение
+	//   distinct_count — количество уникальных значений поля ValueField
+	Operator string `json:"operator,omitempty"`
+ 
+	// ThresholdValue — пороговое значение для type=threshold.
+	// Используется float64 для поддержки дробных порогов (байты, секунды и т.п.).
+	// Если не задан — используется Threshold (int) как fallback.
+	ThresholdValue float64 `json:"threshold_value,omitempty"`
+ 
+	// ── Поля для type=sequence ───────────────────────────────────────────────
+ 
+	// Steps — шаги последовательности начиная со второго.
+	// Первый шаг — это условия верхнего уровня правила (Rule.Conditions).
+	// Steps[0] — условия второго шага, Steps[1] — третьего и т.д.
+	//
+	// Каждый шаг должен сработать в пределах TimeWindow с момента первого шага.
+	// Порядок обязателен: шаг N засчитывается только если уже выполнен шаг N-1.
+	Steps [][]Condition `json:"steps,omitempty"`
 }
 
 // Action представляет действие при срабатывании правила
@@ -71,6 +110,15 @@ const (
 	AggregationCount     = "count"
 	AggregationSequence  = "sequence"
 	AggregationThreshold = "threshold"
+)
+
+// Операторы threshold-агрегации
+ 
+const (
+	ThresholdOpSum           = "sum"
+	ThresholdOpMax           = "max"
+	ThresholdOpAvg           = "avg"
+	ThresholdOpDistinctCount = "distinct_count"
 )
 
 // Типы действий

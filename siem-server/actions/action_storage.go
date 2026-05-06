@@ -17,7 +17,6 @@ func NewActionStorage(pool *pgxpool.Pool) *ActionStorage {
 	return &ActionStorage{pool: pool}
 }
 
-// LogAction - ГЛАВНОЕ ИСПРАВЛЕНИЕ: метод для интерфейса ActionLogger
 // Если ID == 0, создает новую запись (INSERT)
 // Если ID != 0, обновляет существующую (UPDATE)
 func (as *ActionStorage) LogAction(ctx context.Context, actionLog *ActionLog) error {

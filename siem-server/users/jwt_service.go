@@ -26,10 +26,6 @@ type JWTService struct {
 
 func NewJWTService() *JWTService {
 	secret := os.Getenv("JWT_SECRET")
-	if secret == "" {
-		// fallback для dev, НЕ использовать в prod
-		secret = "CHANGE_ME_IN_PRODUCTION_USE_ENV_VARIABLE"
-	}
 	return &JWTService{secret: []byte(secret)}
 }
 

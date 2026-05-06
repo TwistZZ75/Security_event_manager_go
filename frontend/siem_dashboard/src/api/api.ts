@@ -157,3 +157,24 @@ export async function setRuleEnabled(id: string, enabled: boolean): Promise<void
 export async function deleteRule(id: string): Promise<void> {
   return request<void>(`/rules/${id}`, { method: 'DELETE' });
 }
+
+// ── Пользователи (только admin) ───────────────────────────────────────────────
+
+export async function getUsers(): Promise<import('./types').SafeUser[]> {
+  const data = await request<import('./types').SafeUser[] | null>('/users');
+  return data ?? [];
+}
+
+export async function deleteUser(id: number): Promise<void> {
+  return request<void>(`/users/${id}`, { method: 'DELETE' });
+}
+
+export async function updateUser(
+  id: number,
+  input: { email?: string; password?: string; role?: import('./types').UserRole; is_active?: boolean },
+): Promise<import('./types').SafeUser> {
+  return request<import('./types').SafeUser>(`/users/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(input),
+  });
+}

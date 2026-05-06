@@ -10,3 +10,4 @@
 /agent_windows/agent/proto/agent_service.proto
 /frontend/files
 /frontend.rar
+/migrations/rules.sql

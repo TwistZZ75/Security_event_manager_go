@@ -99,7 +99,6 @@ func main() {
 
 	logParser := parsers.NewParser()
 
-	// ВАЖНО: Передаем ruleEngine в LogProc!
 	logProc := processor.NewLogProc(logParser, logStorage, ruleEngine)
 
 	log.Println("Processors initialized")

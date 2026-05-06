@@ -89,7 +89,7 @@ export default function AlertsPage() {
     { value: 'false_positive', label: 'Ложная тревога' },
   ];
   const STATUS_CLOSED = [
-    { value: 'open',           label: 'Переоткрыть', icon: <RotateCcw size={12} /> },
+    { value: 'open',           label: 'Сбросить статус', icon: <RotateCcw size={12} /> },
     { value: 'resolved',       label: 'Закрыть как решённый' },
     { value: 'false_positive', label: 'Ложная тревога' },
   ];
@@ -166,7 +166,7 @@ export default function AlertsPage() {
 
   return (
     <div style={{ padding: '0 0 40px' }} className="animate-in">
-      <PageHeader title="Алерты" subtitle="Инциденты безопасности и тревоги" />
+      <PageHeader title="Оповещения" subtitle="Инциденты безопасности и тревоги" />
       <div style={{ padding: '0 32px' }}>
         {error && <div style={errorBox}><XCircle size={14} /> {error}</div>}
         {loading ? <Spinner label="алертов" /> : (

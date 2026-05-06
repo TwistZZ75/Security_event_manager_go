@@ -46,7 +46,7 @@ func NewDispatcher(actionLog ActionLogger, agentComm AgentCommunicator, notifier
 		executors: make(map[string]Executor),
 		actionLog: actionLog,
 		agentComm: agentComm,
-		notifier:  notifier, // ← ДОБАВЛЕНО!
+		notifier:  notifier,
 	}
 
 	d.RegisterExecutor(NewNotifyExecutor(notifier))

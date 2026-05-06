@@ -8,10 +8,18 @@ import ActionsPage from './pages/ActionsPage';
 import RulesPage from './pages/RulesPage';
 import CreateRulePage from './pages/CreateRulePage';
 import EventsPage from './pages/EventsPage';
+import UsersPage from './pages/UsersPage';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useAuth();
   return isAuthenticated ? <>{children}</> : <Navigate to="/login" replace />;
+}
+
+function AdminRoute({ children }: { children: React.ReactNode }) {
+  const { user } = useAuth();
+  if (!user) return <Navigate to="/login" replace />;
+  if (user.role !== 'admin') return <Navigate to="/agents" replace />;
+  return <>{children}</>;
 }
 
 function AppRoutes() {
@@ -28,6 +36,7 @@ function AppRoutes() {
         <Route path="rules/create" element={<CreateRulePage />} />
         <Route path="rules/edit/:id" element={<CreateRulePage />} />
         <Route path="events"       element={<EventsPage />} />
+        <Route path="users"        element={<AdminRoute><UsersPage /></AdminRoute>} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

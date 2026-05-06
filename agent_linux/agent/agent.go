@@ -60,15 +60,15 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	// Создаем агента
+	agent := utils.NewAgent(serverAddr, cfg)
+	agent.Start()
+
 	//запуск коллекторов
 	collectors := grpc_ag.StartAllCollectors(ctx, cfg)
 
 	//запуск горутины для сбора логов и их буфферизации для каждого из коллекторов
 	go grpc_ag.BatchLogs(ctx, client, collectors)
-
-	// Создаем агента
-	agent := utils.NewAgent(serverAddr, cfg)
-	agent.Start()
 
 	// Обработка Ctrl+C
 	signalChan := make(chan os.Signal, 1)
@@ -83,7 +83,5 @@ func main() {
 	}
 	fmt.Println("\nПолучен сигнал завершения. Останавливаем сбор логов...")
 	agent.Stop()
-
-	//cancel()
 
 }

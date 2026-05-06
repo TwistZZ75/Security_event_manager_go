@@ -2,7 +2,7 @@ import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import {
   LayoutDashboard, Bell, Zap, BookOpen,
-  LogOut, Shield, ChevronRight, Activity, User,
+  LogOut, Shield, ChevronRight, Activity, User, Users,
   type LucideIcon,
 } from 'lucide-react';
 import type { UserRole } from '../types';
@@ -12,13 +12,14 @@ const NAV: Array<{
   label: string;
   icon: LucideIcon;
   end?: boolean;
-  requiredRole?: UserRole[];
+  onlyRole?: UserRole;
 }> = [
-  { to: '/agents',  label: 'Агенты',    icon: LayoutDashboard, end: true },
-  { to: '/alerts',  label: 'Алерты',    icon: Bell },
-  { to: '/events',  label: 'События',   icon: Activity },
-  { to: '/actions', label: 'Действия',  icon: Zap },
-  { to: '/rules',   label: 'Правила',   icon: BookOpen },
+  { to: '/agents',  label: 'Агенты',       icon: LayoutDashboard, end: true },
+  { to: '/alerts',  label: 'Оповещения',       icon: Bell },
+  { to: '/events',  label: 'События',      icon: Activity },
+  { to: '/actions', label: 'Действия',     icon: Zap },
+  { to: '/rules',   label: 'Правила',      icon: BookOpen },
+  { to: '/users',   label: 'Пользователи', icon: Users, onlyRole: 'admin' },
 ];
 
 const ROLE_LABELS: Record<UserRole, string> = {
@@ -74,17 +75,17 @@ export default function Layout() {
               fontFamily: 'var(--font-display)', fontWeight: 800,
               fontSize: '15px', letterSpacing: '0.02em',
             }}>
-              КОНСОЛЬ
+              SIEM
             </div>
             <div style={{ fontSize: '10px', color: 'var(--text-secondary)', letterSpacing: '0.12em' }}>
-              СОБЫТИЙ
+              КОНСОЛЬ
             </div>
           </div>
         </div>
 
         {/* Nav */}
         <nav style={{ flex: 1, padding: '14px 10px' }}>
-          {NAV.map(({ to, label, icon: Icon, end }) => (
+          {NAV.filter(item => !item.onlyRole || role === item.onlyRole).map(({ to, label, icon: Icon, end }) => (
             <NavLink
               key={to} to={to} end={end}
               style={({ isActive }) => ({
