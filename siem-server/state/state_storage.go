@@ -183,7 +183,7 @@ func (ss *StateStorage) GetStatesByRule(ctx context.Context, ruleID string) ([]*
 			id, rule_id, group_key, counter,
 			first_seen, last_seen, state_data, expires_at
 		FROM rule_state
-		WHERE rule_id = $1
+		WHERE rule_id = $1	
 		ORDER BY counter DESC
 	`
 

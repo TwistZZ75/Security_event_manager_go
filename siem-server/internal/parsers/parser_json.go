@@ -44,11 +44,11 @@ func (sur *ParseSuricataStruct) Parser(raw_log *logsstructure.RawLog) (*logsstru
 	return NormalizedLog, nil
 }
 
-func (sur *ParseSuricataStruct) GenerateID(raw_log *logstructure.RawLog) string {
-	data := raw_log.Log_source + raw_log.PC_name + raw_log.Username + raw_log.Raw_data
-	hashID := sha256.Sum256([]byte(data))
-	return hex.EncodeToString((hashID[:]))
-}
+	func (sur *ParseSuricataStruct) GenerateID(raw_log *logstructure.RawLog) string {
+		data := raw_log.Log_source + raw_log.PC_name + raw_log.Username + raw_log.Raw_data
+		hashID := sha256.Sum256([]byte(data))
+		return hex.EncodeToString((hashID[:]))
+	}
 
 func (sur *ParseSuricataStruct) Define_EventDescription(raw_log string) string {
 	var event SuricataEvent

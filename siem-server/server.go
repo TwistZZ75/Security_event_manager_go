@@ -27,6 +27,18 @@ import (
 	"google.golang.org/grpc/reflection"
 )
 
+//Концептуальные ошибки:
+//1. Отсутствие graceful shutdown для веб-сервера и фоновых горутин (сейчас ожидается только завершение grpc сервера)
+//TODO: прокинуть контекст, чтобы при завершении работы сервера остальные элементы тоже знали о том, что пора завершаться
+//2. Нагруженный main
+//TODO: вынести инициализации в отдельные функции
+//3. Захардкоженные значения порта, интервалы тикеров, ограничений grpc
+//TODO: вынести это всё в config файл, будь то env или yaml
+//4. Использование log для логирования
+//TODO: использовать slog/zap/zerolog
+//5. Использование gRPC reflection
+//TODO: изменить подход
+
 func main() {
 
 	log.Println("Starting SIEM server...")
@@ -46,6 +58,8 @@ func main() {
 	}
 	defer pool.Close()
 
+	//Ошибка: пинг использует Context.Background, это может привести к зависанию, если БД недоступна
+	//TODO: использовать контекст с таймаутом
 	if err := pool.Ping(ctx); err != nil {
 		log.Fatalf("Failed to ping database: %v", err)
 	}
@@ -84,13 +98,20 @@ func main() {
 	)
 
 	// Загружаем правила из БД
+	//Ошибка: использование Context.Background
+	//TODO: использовать контест с таймаутом
 	if err := ruleEngine.LoadRules(ctx); err != nil {
 		log.Fatalf("Failed to load rules: %v", err)
 	}
 
 	// Выводим информацию о загруженных правилах
-	rulesCount, _ := ruleStorage.GetEnabledRulesCount(ctx)
-	log.Printf("Rule Engine initialized with %d enabled rules", rulesCount)
+	//Ошибка: игнорирование ошибки возвращаемой функцией
+	//rulesCount, _ := ruleStorage.GetEnabledRulesCount(ctx)
+	ruleCount, err := ruleStorage.GetEnabledRulesCount(ctx)
+	if err != nil {
+		//TODO: добавить логирование ошибки
+	}
+	log.Printf("Rule Engine initialized with %d enabled rules", ruleCount)
 
 	// ============================================================================
 	// PROCESSORS
@@ -166,24 +187,31 @@ func main() {
 			if err := ruleEngine.ReloadRules(ctx); err != nil {
 				log.Printf("Failed to reload rules: %v", err)
 			} else {
-				count, _ := ruleStorage.GetEnabledRulesCount(ctx)
-				log.Printf("Rules reloaded: %d enabled", count)
+				//Ошибка: игнорирование ошибки возвращаемой функцией
+				//исправить название переменной
+				//count, _ := ruleStorage.GetEnabledRulesCount(ctx)
+				ruleCount, err := ruleStorage.GetEnabledRulesCount(ctx)
+				if err != nil {
+					//TODO: логирование ошибки
+				}
+				log.Printf("Rules reloaded: %d enabled", ruleCount)
 			}
 		}
 	}()
 
 	go func() {
+		//проверка статуса агентов при запуске
 		if err := agentStorage.MarkOfflineAgents(ctx); err != nil {
 			log.Printf("Failed to mark agent offline: %v", err)
 		}
-		ticker := time.NewTicker(1 * time.Minute)
+		ticker := time.NewTicker(1 * time.Minute) //все дальнейшие проверки идут по тикеру
 		defer ticker.Stop()
 
 		for range ticker.C {
 			if err := agentStorage.MarkOfflineAgents(ctx); err != nil {
 				log.Printf("Failed to mark agent offline: %v", err)
-			} else {
-				agentStorage.MarkOfflineAgents(ctx)
+			} else { //здесь ошибка: второй вызов MarkOfflineAgents, он вызывается уже при при проверке условия
+				//agentStorage.MarkOfflineAgents(ctx)
 				log.Printf("Agent marked offline")
 			}
 		}
@@ -198,6 +226,7 @@ func main() {
 
 	portStr := os.Getenv("PORT")
 	listener, err := net.Listen("tcp", portStr)
+	//bad practice: прокидывать fatal
 	if err != nil {
 		log.Fatalf("Failed to listen port: %v", err)
 	}
@@ -211,6 +240,8 @@ func main() {
 	pb.RegisterLogServiceServer(grpcServ, logHandler)
 	pb.RegisterAgentServiceServer(grpcServ, agentHandler)
 
+	//Ошибка: использование reflection
+	//TODO: использовать другой способ регистрации
 	reflection.Register(grpcServ)
 
 	log.Printf("Server is ready on %s", portStr)
@@ -228,6 +259,8 @@ func main() {
 	}()
 
 	// Запускаем сервер
+	//bad practice: прокидывать fatal
+	//TODO: получить ошибку, обернуть её через %w и записать в логи
 	if err := grpcServ.Serve(listener); err != nil {
 		log.Fatalf("Failed to serve: %v", err)
 	}
