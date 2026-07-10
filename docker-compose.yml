@@ -1,0 +1,52 @@
+services:
+
+  # ── PostgreSQL ──────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: siem_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER:     siem_user
+      POSTGRES_PASSWORD: siem_password
+      POSTGRES_DB:       siem_db
+    volumes:
+      - ./migrations/migration.sql:/docker-entrypoint-initdb.d/init.sql:ro
+
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      # Открываем наружу только для отладки
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U siem_user -d siem_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+  siem-server:
+    build:
+      context: ./siem-server
+      dockerfile: Dockerfile
+    container_name: siem_server
+    restart: unless-stopped
+    env_file: ./siem-server/.env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8080:8080"   # HTTP REST API
+      - "5000:5000" # gRPC (для агентов и клиентов логов)
+
+
+  # ── React-фронтенд ──────────────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend/siem_dashboard
+      dockerfile: Dockerfile
+    container_name: siem_frontend
+    restart: unless-stopped
+    depends_on:
+      - siem-server
+    ports:
+      - "3000:80"
+
+volumes:
+  postgres_data:

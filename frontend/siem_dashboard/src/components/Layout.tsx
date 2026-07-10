@@ -75,10 +75,10 @@ export default function Layout() {
               fontFamily: 'var(--font-display)', fontWeight: 800,
               fontSize: '15px', letterSpacing: '0.02em',
             }}>
-              SIEM
+              КОНСОЛЬ
             </div>
             <div style={{ fontSize: '10px', color: 'var(--text-secondary)', letterSpacing: '0.12em' }}>
-              КОНСОЛЬ
+              Аналитика
             </div>
           </div>
         </div>

@@ -1,3 +1,4 @@
+CREATE TYPE user_role AS ENUM ('admin', 'analyst', 'viewer');
 CREATE TABLE users(
     id SERIAL NOT NULL,
     username varchar(50) NOT NULL,
@@ -16,6 +17,46 @@ CREATE UNIQUE INDEX users_email_unique ON public.users USING btree (email);
 CREATE INDEX idx_users_username ON public.users USING btree (username);
 CREATE INDEX idx_users_email ON public.users USING btree (email);
 CREATE INDEX idx_users_is_active ON public.users USING btree (is_active);
+
+CREATE TABLE rules(
+    id varchar(255) NOT NULL,
+    name varchar(500) NOT NULL,
+    enabled boolean DEFAULT false,
+    severity varchar(50) NOT NULL,
+    rule_definition jsonb NOT NULL,
+    tags text[],
+    created_by varchar(255),
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    updated_by varchar(255),
+    updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    last_triggered timestamp without time zone,
+    trigger_count bigint DEFAULT 0,
+    PRIMARY KEY(id),
+    CONSTRAINT rules_severity_check CHECK ((severity)::text = ANY ((ARRAY['low'::character varying, 'medium'::character varying, 'high'::character varying, 'critical'::character varying])::text[]))
+);
+CREATE INDEX idx_rules_created_at ON public.rules USING btree (created_at DESC);
+
+CREATE TABLE alerts(
+    id SERIAL NOT NULL,
+    rule_id varchar(255) NOT NULL,
+    rule_name varchar(500),
+    severity varchar(50) NOT NULL,
+    title varchar(500) NOT NULL,
+    description text,
+    event_data jsonb,
+    status varchar(50) DEFAULT 'open'::character varying,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    acknowledged_at timestamp without time zone,
+    acknowledged_by varchar(255),
+    resolved_at timestamp without time zone,
+    resolved_by varchar(255),
+    notes text,
+    PRIMARY KEY(id),
+    CONSTRAINT alerts_rule_id_fkey FOREIGN key(rule_id) REFERENCES rules(id),
+    CONSTRAINT alerts_severity_check CHECK ((severity)::text = ANY ((ARRAY['low'::character varying, 'medium'::character varying, 'high'::character varying, 'critical'::character varying])::text[])),
+    CONSTRAINT alerts_status_check CHECK ((status)::text = ANY ((ARRAY['open'::character varying, 'acknowledged'::character varying, 'resolved'::character varying, 'false_positive'::character varying])::text[]))
+);
+CREATE INDEX idx_alerts_status_created ON public.alerts USING btree (status, created_at DESC);
 
 CREATE TABLE actions_log(
     id SERIAL NOT NULL,
@@ -83,27 +124,7 @@ CREATE INDEX idx_agents_last_seen ON public.agents USING btree (last_seen DESC);
 COMMENT ON TABLE agents IS 'Registered SIEM agents on client machines';
 COMMENT ON COLUMN agents.last_seen IS 'Last time agent communicated with server';
 
-CREATE TABLE alerts(
-    id SERIAL NOT NULL,
-    rule_id varchar(255) NOT NULL,
-    rule_name varchar(500),
-    severity varchar(50) NOT NULL,
-    title varchar(500) NOT NULL,
-    description text,
-    event_data jsonb,
-    status varchar(50) DEFAULT 'open'::character varying,
-    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
-    acknowledged_at timestamp without time zone,
-    acknowledged_by varchar(255),
-    resolved_at timestamp without time zone,
-    resolved_by varchar(255),
-    notes text,
-    PRIMARY KEY(id),
-    CONSTRAINT alerts_rule_id_fkey FOREIGN key(rule_id) REFERENCES rules(id),
-    CONSTRAINT alerts_severity_check CHECK ((severity)::text = ANY ((ARRAY['low'::character varying, 'medium'::character varying, 'high'::character varying, 'critical'::character varying])::text[])),
-    CONSTRAINT alerts_status_check CHECK ((status)::text = ANY ((ARRAY['open'::character varying, 'acknowledged'::character varying, 'resolved'::character varying, 'false_positive'::character varying])::text[]))
-);
-CREATE INDEX idx_alerts_status_created ON public.alerts USING btree (status, created_at DESC);
+
 
 CREATE TABLE normalized_events(
     id varchar(64) NOT NULL,
@@ -150,21 +171,5 @@ CREATE TABLE rule_state(
 CREATE UNIQUE INDEX rule_state_rule_id_group_key_key ON public.rule_state USING btree (rule_id, group_key);
 CREATE INDEX idx_rule_state_rule_group ON public.rule_state USING btree (rule_id, group_key);
 
-CREATE TABLE rules(
-    id varchar(255) NOT NULL,
-    name varchar(500) NOT NULL,
-    enabled boolean DEFAULT false,
-    severity varchar(50) NOT NULL,
-    rule_definition jsonb NOT NULL,
-    tags text[],
-    created_by varchar(255),
-    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
-    updated_by varchar(255),
-    updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
-    last_triggered timestamp without time zone,
-    trigger_count bigint DEFAULT 0,
-    PRIMARY KEY(id),
-    CONSTRAINT rules_severity_check CHECK ((severity)::text = ANY ((ARRAY['low'::character varying, 'medium'::character varying, 'high'::character varying, 'critical'::character varying])::text[]))
-);
-CREATE INDEX idx_rules_created_at ON public.rules USING btree (created_at DESC);
+
 
