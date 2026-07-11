@@ -291,7 +291,7 @@ func (rst *RuleStorage) GetEnabledRulesCount(ctx context.Context) (int, error) {
 	var count int
 	err := rst.pool.QueryRow(ctx, query).Scan(&count)
 	if err != nil {
-		return 0, fmt.Errorf("failed to count enabled rules: %v", err)
+		return 0, fmt.Errorf("failed to count enabled rules: %w", err)
 	}
 
 	return count, nil
