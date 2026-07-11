@@ -83,11 +83,7 @@ API для веб-интерфейса	HTTP REST
 База данных	PostgreSQL + драйвер pgx
 Логирование	slog
 Контейнеризация	Docker + docker-compose
-Язык разработки	Go (сервер), C++ (агенты Windows/Linux)
-Запуск системы
-Сборка и развёртывание производятся через docker-compose:
-bash
-docker-compose up -d
+Язык разработки	Go
 
 Текущие ограничения и планы
 
