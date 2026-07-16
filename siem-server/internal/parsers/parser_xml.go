@@ -59,7 +59,7 @@ func NewXmlParse() *ParseXmlStruct {
 
 func (xml_p *ParseXmlStruct) Parser(raw_log *logstructure.RawLog) (*logstructure.NormalizedLog, error) {
 	NormalizedLog := &logstructure.NormalizedLog{
-		ID:                xml_p.GenerateID(raw_log),
+		ID:                xml_p.generateID(raw_log),
 		PC_name:           raw_log.PC_name,
 		Username:          raw_log.Username,
 		Event_description: xml_p.Define_EventDescription(raw_log.Raw_data),
@@ -91,7 +91,7 @@ func (xml_p *ParseXmlStruct) sanitizeXML(s string) string {
 	return b.String()
 }
 
-func (xml_p *ParseXmlStruct) GenerateID(raw_log *logstructure.RawLog) string {
+func (xml_p *ParseXmlStruct) generateID(raw_log *logstructure.RawLog) string {
 	data := raw_log.Log_source + raw_log.PC_name + raw_log.Username + raw_log.Raw_data
 	hashID := sha256.Sum256([]byte(data))
 	return hex.EncodeToString(hashID[:])

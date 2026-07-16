@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"log/slog"
 	"net"
 	"regexp"
@@ -62,12 +61,38 @@ func (e *Engine) LoadRules(ctx context.Context) error {
 
 	e.rules = make(map[string]*Rule)
 	for _, rule := range rules {
-		if rule.Enabled {
-			e.rules[rule.ID] = rule
+		if !rule.Enabled {
+			continue
 		}
+		if err := compileRegex(rule); err != nil {
+			slog.Warn("cannot compile regex for rule", "rule", rule, "error", err)
+			continue
+		}
+		e.rules[rule.ID] = rule
 	}
 
-	log.Printf("Loaded %d enabled rules", len(e.rules))
+	slog.Info("Loaded enabled rules", "rules", len(e.rules))
+	return nil
+}
+
+func compileRegex(rule *Rule) error {
+	if rule.Conditions == nil {
+		return nil
+	}
+	for i := range rule.Conditions {
+		cond := &rule.Conditions[i]
+		if cond.Operator == OpRegex {
+			strVal, ok := cond.Value.(string)
+			if !ok {
+				return fmt.Errorf("regex operator requires string value, got %T", cond.Value)
+			}
+			re, err := regexp.Compile(strVal)
+			if err != nil {
+				return fmt.Errorf("invalid regex pattern %q: %w", strVal, err)
+			}
+			cond.CompiledRegex = re
+		}
+	}
 	return nil
 }
 
@@ -132,27 +157,32 @@ func (e *Engine) evaluateRule(ctx context.Context, rule *Rule, normLog *logstruc
 
 func (e *Engine) handleCountAggregation(ctx context.Context, rule *Rule, normLog *logstructure.NormalizedLog) error {
 	if rule.Aggregation.TimeWindow == "" {
+		slog.Error("Time window field is empty", "Rule", rule.Name)
 		return fmt.Errorf("rule %q: aggregation.time_window is empty", rule.Name)
 	}
 	window, err := parseDuration(rule.Aggregation.TimeWindow)
 	if err != nil {
+		slog.Error("Invalid time window", "Rule", rule.Name, "time window", rule.Aggregation.TimeWindow, "error", err)
 		return fmt.Errorf("rule %q: invalid time_window %q: %w", rule.Name, rule.Aggregation.TimeWindow, err)
 	}
 	if rule.Aggregation.Threshold <= 0 {
+		slog.Error("Treshold must be more than zero", "Rule", rule.Name)
 		return fmt.Errorf("rule %q: threshold must be > 0", rule.Name)
 	}
 
 	groupKey := e.buildGroupKey(rule.Aggregation.Field, normLog)
 	if groupKey == "" {
+		slog.Warn("Group key is emty", "rule", rule.Name)
 		return nil
 	}
 
 	st, err := e.stateStore.IncrementCounter(ctx, rule.ID, groupKey, window)
 	if err != nil {
+		slog.Error("Failed to increment conter", "Rule", rule.Name, "error", err)
 		return fmt.Errorf("rule %q: failed to increment counter: %w", rule.Name, err)
 	}
 
-	log.Printf("[count] rule=%q key=%q counter=%d/%d", rule.Name, groupKey, st.Counter, rule.Aggregation.Threshold)
+	slog.Info("[count]", "rule", rule.Name, "key", groupKey, "counter", st.Counter, "Treshold", rule.Aggregation.Threshold)
 
 	if st.Counter >= rule.Aggregation.Threshold {
 		stateData := map[string]interface{}{
@@ -166,7 +196,8 @@ func (e *Engine) handleCountAggregation(ctx context.Context, rule *Rule, normLog
 			"window":           rule.Aggregation.TimeWindow,
 		}
 		if err := e.stateStore.DeleteState(ctx, rule.ID, groupKey); err != nil {
-			log.Printf("Rule %q: failed to reset state: %v", rule.Name, err)
+			slog.Error("Rule failed to reset state", "rule name", rule.Name, "error", err)
+			return fmt.Errorf("Failed to reset state %w", err)
 		}
 		return e.triggerRule(ctx, rule, normLog, stateData)
 	}
@@ -189,12 +220,15 @@ func (e *Engine) handleThresholdAggregation(ctx context.Context, rule *Rule, nor
 	agg := rule.Aggregation
 
 	if agg.TimeWindow == "" {
+		slog.Error("threshold aggregation requires time_window", "rule", rule.Name)
 		return fmt.Errorf("rule %q: threshold aggregation requires time_window", rule.Name)
 	}
 	if agg.Operator == "" {
+		slog.Error("threshold aggregation requires operator (sum/max/avg/distinct_count)", "rule", rule.Name)
 		return fmt.Errorf("rule %q: threshold aggregation requires operator (sum/max/avg/distinct_count)", rule.Name)
 	}
 	if agg.ValueField == "" {
+		slog.Error("threshold aggregation requires value_field", "rule", rule.Name)
 		return fmt.Errorf("rule %q: threshold aggregation requires value_field", rule.Name)
 	}
 
@@ -204,16 +238,19 @@ func (e *Engine) handleThresholdAggregation(ctx context.Context, rule *Rule, nor
 		thresholdValue = float64(agg.Threshold)
 	}
 	if thresholdValue <= 0 {
+		slog.Error("threshold_value must be > 0", "rule", rule.Name)
 		return fmt.Errorf("rule %q: threshold_value must be > 0", rule.Name)
 	}
 
 	window, err := parseDuration(agg.TimeWindow)
 	if err != nil {
+		slog.Error("invalid time_window", "rule", rule.Name, "error", err)
 		return fmt.Errorf("rule %q: invalid time_window: %w", rule.Name, err)
 	}
 
 	groupKey := e.buildGroupKey(agg.Field, normLog)
 	if groupKey == "" {
+		slog.Warn("Group key is emty", "rule", rule.Name)
 		return nil
 	}
 
@@ -223,6 +260,7 @@ func (e *Engine) handleThresholdAggregation(ctx context.Context, rule *Rule, nor
 	// Загружаем текущее состояние (или создаём пустое)
 	existingState, err := e.stateStore.GetState(ctx, rule.ID, groupKey)
 	if err != nil {
+		slog.Error("failed to get state", "rule", rule.Name, "error", err)
 		return fmt.Errorf("rule %q: failed to get state: %w", rule.Name, err)
 	}
 
@@ -239,41 +277,47 @@ func (e *Engine) handleThresholdAggregation(ctx context.Context, rule *Rule, nor
 
 	switch agg.Operator {
 	case ThresholdOpSum:
-		numVal, ok := parseFloat(rawValue)
-		if !ok {
-			log.Printf("[threshold/sum] rule=%q: cannot parse numeric value from field %q: %q", rule.Name, agg.ValueField, rawValue)
-			return nil
+		numVal, err := parseFloat(rawValue)
+		if err != nil {
+			slog.Error("[threshold/sum] cannot parse numeric value from field", "rule", rule.Name,
+				"agregation value", agg.ValueField, "raw value", rawValue, "error", err)
+			return fmt.Errorf("Cannot parse numeric value from field. Rule: %q, error:%w", rule.Name, err)
 		}
 		ts.Accumulated += numVal
 		ts.Count++
 		currentValue = ts.Accumulated
 		triggered = currentValue >= thresholdValue
-		log.Printf("[threshold/sum] rule=%q key=%q sum=%.2f/%.2f", rule.Name, groupKey, currentValue, thresholdValue)
+		slog.Info("[threshold/sum]", "rule", rule.Name, "key", groupKey,
+			"current value", currentValue, "treshold value", thresholdValue)
 
 	case ThresholdOpMax:
-		numVal, ok := parseFloat(rawValue)
-		if !ok {
-			log.Printf("[threshold/max] rule=%q: cannot parse numeric value from field %q: %q", rule.Name, agg.ValueField, rawValue)
-			return nil
+		numVal, err := parseFloat(rawValue)
+		if err != nil {
+			slog.Error("[threshold/max] cannot parse numeric value from field", "rule", rule.Name,
+				"field", agg.ValueField, "value", rawValue)
+			return fmt.Errorf("Parse error %w", err)
 		}
 		if numVal > ts.Accumulated {
 			ts.Accumulated = numVal
 		}
 		currentValue = ts.Accumulated
 		triggered = currentValue >= thresholdValue
-		log.Printf("[threshold/max] rule=%q key=%q max=%.2f/%.2f", rule.Name, groupKey, currentValue, thresholdValue)
+		slog.Info("[threshold/max]", "rule", rule.Name, "key", groupKey,
+			"current value", currentValue, "max value", thresholdValue)
 
 	case ThresholdOpAvg:
-		numVal, ok := parseFloat(rawValue)
-		if !ok {
-			log.Printf("[threshold/avg] rule=%q: cannot parse numeric value from field %q: %q", rule.Name, agg.ValueField, rawValue)
-			return nil
+		numVal, err := parseFloat(rawValue)
+		if err != nil {
+			slog.Error("[threshold/avg] cannot parse numeric value from field", "rule", rule.Name,
+				"field", agg.ValueField, "value", rawValue)
+			return fmt.Errorf("Parse error %w", err)
 		}
 		ts.Accumulated += numVal
 		ts.Count++
 		currentValue = ts.Accumulated / float64(ts.Count)
 		triggered = currentValue >= thresholdValue
-		log.Printf("[threshold/avg] rule=%q key=%q avg=%.2f/%.2f (n=%d)", rule.Name, groupKey, currentValue, thresholdValue, ts.Count)
+		slog.Info("[threshold/avg]", "rule", rule.Name, "key", groupKey,
+			"current value", currentValue, "treshold value", thresholdValue)
 
 	case ThresholdOpDistinctCount:
 		// rawValue — строковое значение, считаем уникальные
@@ -283,7 +327,8 @@ func (e *Engine) handleThresholdAggregation(ctx context.Context, rule *Rule, nor
 		}
 		currentValue = float64(len(ts.Distinct))
 		triggered = currentValue >= thresholdValue
-		log.Printf("[threshold/distinct] rule=%q key=%q distinct=%.0f/%.0f", rule.Name, groupKey, currentValue, thresholdValue)
+		slog.Info("[threshold/distinct]", "rule", rule.Name, "key", groupKey,
+			"current value", currentValue, "treshold value", thresholdValue)
 
 	default:
 		return fmt.Errorf("rule %q: unknown threshold operator %q (use: sum, max, avg, distinct_count)", rule.Name, agg.Operator)
@@ -305,7 +350,8 @@ func (e *Engine) handleThresholdAggregation(ctx context.Context, rule *Rule, nor
 		}
 		// Сбрасываем состояние после срабатывания
 		if err := e.stateStore.DeleteState(ctx, rule.ID, groupKey); err != nil {
-			log.Printf("Rule %q: failed to reset threshold state: %v", rule.Name, err)
+			slog.Error("failed to reset threshold state", "rule", rule.Name, "error", err)
+			return fmt.Errorf("failed to reset threshold state %w", err)
 		}
 		return e.triggerRule(ctx, rule, normLog, stateData)
 	}
@@ -369,6 +415,7 @@ func (e *Engine) handleSequenceAggregation(ctx context.Context, rule *Rule, norm
 
 	groupKey := e.buildGroupKey(agg.Field, normLog)
 	if groupKey == "" {
+		slog.Warn("Group key is emty", "rule", rule.Name)
 		return nil
 	}
 
@@ -396,7 +443,8 @@ func (e *Engine) handleSequenceAggregation(ctx context.Context, rule *Rule, norm
 		ExpiresAt: time.Now().Add(window),
 	}
 
-	log.Printf("[sequence] rule=%q key=%q step=0 completed, waiting for step 1/%d", rule.Name, groupKey, len(agg.Steps))
+	slog.Info("[sequence] step=0 completed, waiting for next step", "rule", rule.Name,
+		"key", groupKey, "next step", len(agg.Steps))
 	return e.stateStore.SaveState(ctx, newState)
 }
 
@@ -411,19 +459,20 @@ func (e *Engine) handleSequenceIntermediateSteps(ctx context.Context, rule *Rule
 
 	groupKey := e.buildGroupKey(agg.Field, normLog)
 	if groupKey == "" {
+		slog.Warn("Group key is emty", "rule", rule.Name)
 		return nil
 	}
 
 	existingState, err := e.stateStore.GetState(ctx, rule.ID, groupKey)
 	if err != nil || existingState == nil {
-		return nil // нет активной последовательности для этого ключа
+		return errors.Join(err) // нет активной последовательности для этого ключа
 	}
 
 	// Декодируем состояние
 	var ss sequenceState
 	if b, err := json.Marshal(existingState.StateData); err == nil {
 		if err := json.Unmarshal(b, &ss); err != nil {
-			return nil
+			return fmt.Errorf("JSON unmarshal error %w", err)
 		}
 	}
 
@@ -442,7 +491,8 @@ func (e *Engine) handleSequenceIntermediateSteps(ctx context.Context, rule *Rule
 	ss.StepTimes = append(ss.StepTimes, time.Now())
 	ss.CurrentStep++
 
-	log.Printf("[sequence] rule=%q key=%q step=%d/%d completed", rule.Name, groupKey, ss.CurrentStep-1, totalSteps-1)
+	slog.Info("[sequence] completed", "rule", rule.Name, "key", groupKey,
+		"current step", ss.CurrentStep-1, "total steps", totalSteps-1)
 
 	// Все шаги выполнены — срабатывание!
 	if ss.CurrentStep >= totalSteps {
@@ -456,7 +506,8 @@ func (e *Engine) handleSequenceIntermediateSteps(ctx context.Context, rule *Rule
 			"window":           agg.TimeWindow,
 		}
 		if err := e.stateStore.DeleteState(ctx, rule.ID, groupKey); err != nil {
-			log.Printf("Rule %q: failed to reset sequence state: %v", rule.Name, err)
+			slog.Error("failed to reset sequence state", "rule", rule.Name, "error", err)
+			return fmt.Errorf("failed to reset sequence state. Rule %q, error %w", rule.Name, err)
 		}
 		return e.triggerRule(ctx, rule, normLog, stateData)
 	}
@@ -483,7 +534,7 @@ func (e *Engine) buildGroupKey(field string, normLog *logstructure.NormalizedLog
 	}
 	val := e.getFieldValue(field, normLog)
 	if val == nil {
-		log.Printf("aggregation field %q not found in event, skipping", field)
+		slog.Info("aggregation field not found in event, skipping", "field", field)
 		return ""
 	}
 	return fmt.Sprintf("%s:%v", field, val)
@@ -494,10 +545,12 @@ func (e *Engine) buildGroupKey(field string, normLog *logstructure.NormalizedLog
 //   - стандартные поля NormalizedLog: "username", "pc_name" и т.д.
 //   - dot-нотацию для полей внутри raw_log (JSON): "raw_log.bytes_toserver"
 func (e *Engine) extractValueField(valueField string, normLog *logstructure.NormalizedLog) string {
-	// Если поле начинается с "raw_log." — пробуем распарсить raw_log как JSON
 	if strings.HasPrefix(valueField, "raw_log.") {
 		subField := valueField[len("raw_log."):]
-		return extractJSONField(normLog.Raw_log, subField)
+		if normLog.RawLogCached == nil {
+			return "" // нечего доставать
+		}
+		return getNestedField(normLog.RawLogCached, subField)
 	}
 
 	val := e.getFieldValue(valueField, normLog)
@@ -507,40 +560,31 @@ func (e *Engine) extractValueField(valueField string, normLog *logstructure.Norm
 	return fmt.Sprintf("%v", val)
 }
 
-// extractJSONField извлекает значение вложенного JSON-поля.
-func extractJSONField(jsonStr, path string) string {
-	var data map[string]interface{}
-	if err := json.Unmarshal([]byte(jsonStr), &data); err != nil {
-		return ""
-	}
-
+// getNestedField извлекает строковое значение из вложенной map по dot-нотации.
+func getNestedField(data map[string]interface{}, path string) string {
 	parts := strings.SplitN(path, ".", 2)
 	val, ok := data[parts[0]]
 	if !ok {
 		return ""
 	}
-
 	if len(parts) == 1 {
 		return fmt.Sprintf("%v", val)
 	}
-
-	// Рекурсивно для вложенных объектов
+	// если после точки ещё есть путь — идём глубже
 	if nested, ok := val.(map[string]interface{}); ok {
-		if v, ok := nested[parts[1]]; ok {
-			return fmt.Sprintf("%v", v)
-		}
+		return getNestedField(nested, parts[1])
 	}
 	return ""
 }
 
 // parseFloat пытается распарсить строку как float64.
-func parseFloat(s string) (float64, bool) {
+func parseFloat(s string) (float64, error) {
 	s = strings.TrimSpace(s)
 	f, err := strconv.ParseFloat(s, 64)
 	if err != nil {
-		return 0, false
+		return 0, err
 	}
-	return f, true
+	return f, err
 }
 
 // containsStr проверяет наличие строки в срезе.
@@ -611,15 +655,10 @@ func (e *Engine) checkCondition(cond Condition, normLog *logstructure.Normalized
 	case OpEndsWith:
 		return strings.HasSuffix(fieldLow, strings.ToLower(fmt.Sprintf("%v", cond.Value)))
 	case OpRegex:
-		pattern, ok := cond.Value.(string)
-		if !ok {
+		if cond.CompiledRegex == nil {
 			return false
 		}
-		re, err := regexp.Compile(pattern)
-		if err != nil {
-			return false
-		}
-		return re.MatchString(fieldStr)
+		return cond.CompiledRegex.MatchString(fieldStr)
 	case OpIn:
 		items := toStringSlice(cond.Value)
 		for _, item := range items {
@@ -671,7 +710,7 @@ func (e *Engine) checkCondition(cond Condition, normLog *logstructure.Normalized
 		}
 		return network.Contains(ip)
 	default:
-		log.Printf("unknown operator %q", cond.Operator)
+		slog.Error("unknown operator", "operator", cond.Operator)
 		return false
 	}
 }
@@ -735,8 +774,13 @@ func (e *Engine) getFieldValue(field string, normLog *logstructure.NormalizedLog
 // Срабатывание правила
 // ============================================================================
 
-func (e *Engine) triggerRule(ctx context.Context, rule *Rule, normLog *logstructure.NormalizedLog, stateData map[string]interface{}) error {
-	log.Printf("Rule triggered: %s (%s)", rule.Name, rule.Severity)
+func (e *Engine) triggerRule(
+	ctx context.Context,
+	rule *Rule,
+	normLog *logstructure.NormalizedLog,
+	stateData map[string]interface{}) error {
+	var errs []error
+	slog.Info("Rule triggered", "rule name", rule.Name, "rule severity", rule.Severity)
 
 	eventData := map[string]interface{}{
 		"id":                normLog.ID,
@@ -767,19 +811,26 @@ func (e *Engine) triggerRule(ctx context.Context, rule *Rule, normLog *logstruct
 	}
 
 	if err := e.alertMgr.CreateAlert(ctx, alert); err != nil {
-		return fmt.Errorf("failed to create alert: %v", err)
+		slog.Error("Failed to create alert", "Error", err)
+		return fmt.Errorf("failed to create alert: %w", err)
 	}
 
-	log.Printf("Alert created: ID=%d", alert.ID)
+	slog.Info("Alert created", "ID", alert.ID)
 
 	for _, action := range rule.Actions {
 		if err := e.actionDisp.Execute(ctx, alert, action); err != nil {
-			log.Printf("Action %s failed: %v", action.Type, err)
+			slog.Error("Action failed", "action", action.Type, "error", err)
+			errs = append(errs, fmt.Errorf("Action %s failed, error %w", action.Type, err))
 		}
 	}
 
 	if err := e.ruleStorage.UpdateRuleTrigger(ctx, rule.ID); err != nil {
-		log.Printf("Failed to update rule trigger stats: %v", err)
+		slog.Info("Failed to update rule trigger stats", "error", err)
+		errs = append(errs, fmt.Errorf("Failed to update rule trigger stats, error: %w", err))
+	}
+
+	if len(errs) > 0 {
+		return fmt.Errorf("rule %s triggered but some post-actions failed: %w", rule.Name, errors.Join(errs...))
 	}
 
 	return nil
@@ -809,14 +860,14 @@ func (e *Engine) AddRule(rule *Rule) {
 	e.rulesMutex.Lock()
 	defer e.rulesMutex.Unlock()
 	e.rules[rule.ID] = rule
-	log.Printf("Rule %s added to engine", rule.ID)
+	slog.Info("Rule added to engine", "Rule ID", rule.ID, "rule name", rule.Name)
 }
 
 func (e *Engine) RemoveRule(ruleID string) {
 	e.rulesMutex.Lock()
 	defer e.rulesMutex.Unlock()
 	delete(e.rules, ruleID)
-	log.Printf("Rule %s removed from engine", ruleID)
+	slog.Info("Rule removed from engine", "rule ID", ruleID)
 }
 
 func (e *Engine) GetRulesCount() int {

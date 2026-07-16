@@ -10,7 +10,7 @@ import (
 // возвращает нормализованный лог или ошибку
 type LogParser interface {
 	Parser(raw *logstructure.RawLog) (*logstructure.NormalizedLog, error)
-	GenerateID(raw_log *logstructure.RawLog) string
+	generateID(raw_log *logstructure.RawLog) string
 }
 
 type Parser struct {
@@ -49,5 +49,5 @@ func (mp *Parser) GenerateID(raw_log *logstructure.RawLog) string {
 		return ""
 	}
 
-	return parser.GenerateID(raw_log)
+	return parser.generateID(raw_log)
 }

@@ -17,7 +17,7 @@ func NewSyslogParse() *ParseSyslogStruct {
 
 func (s *ParseSyslogStruct) Parser(raw_log *logstructure.RawLog) (*logstructure.NormalizedLog, error) {
 	entry := &logstructure.NormalizedLog{
-		ID:        s.GenerateID(raw_log),
+		ID:        s.generateID(raw_log),
 		PC_name:   raw_log.PC_name,
 		Username:  raw_log.Username,
 		Timestamp: raw_log.Event_timestamp,
@@ -346,7 +346,7 @@ func (s *ParseSyslogStruct) categorize(app, msg string) (category, severity, des
 	return "System Event", "Info", truncate(msg, 120)
 }
 
-func (s *ParseSyslogStruct) GenerateID(raw_log *logstructure.RawLog) string {
+func (s *ParseSyslogStruct) generateID(raw_log *logstructure.RawLog) string {
 	data := raw_log.Log_source + raw_log.PC_name + raw_log.Username + raw_log.Raw_data
 	h := sha256.Sum256([]byte(data))
 	return hex.EncodeToString(h[:])

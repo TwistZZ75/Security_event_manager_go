@@ -29,7 +29,7 @@ func parseParams(s string) map[string]string {
 
 func (a *ParseAuthStruct) Parser(raw_log *logstructure.RawLog) (*logstructure.NormalizedLog, error) {
 	entry := &logstructure.NormalizedLog{
-		ID:        a.GenerateID(raw_log),
+		ID:        a.generateID(raw_log),
 		PC_name:   raw_log.PC_name,
 		Username:  raw_log.Username,
 		Timestamp: raw_log.Event_timestamp,
@@ -352,7 +352,7 @@ func (a *ParseAuthStruct) categorize(app, msg string, params map[string]string, 
 	return "Authentication", "Info", msg
 }
 
-func (a *ParseAuthStruct) GenerateID(raw_log *logstructure.RawLog) string {
+func (a *ParseAuthStruct) generateID(raw_log *logstructure.RawLog) string {
 	data := raw_log.Log_source + raw_log.PC_name + raw_log.Username + raw_log.Raw_data
 	h := sha256.Sum256([]byte(data))
 	return hex.EncodeToString(h[:])
