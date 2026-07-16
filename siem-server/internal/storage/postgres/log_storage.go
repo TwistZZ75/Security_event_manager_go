@@ -27,10 +27,7 @@ func NewLogStorage(pool *pgxpool.Pool) *LogStorage {
 // чтобы каждый раз не копировать структуру
 // получает ссылку на нормализованный лог
 // возвращает ошибку в случае неудачи
-func (r *LogStorage) Store(entry *logsstructure.NormalizedLog) error {
-
-	//создаём корневой контекст
-	ctx := context.Background()
+func (r *LogStorage) Store(ctx context.Context, entry *logsstructure.NormalizedLog) error {
 
 	//проверка существования пула соединений с БД
 	if r.pool == nil {

@@ -3,8 +3,10 @@ package rules
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
+	"log/slog"
 	"net"
 	"regexp"
 	"siem-server/alerts"
@@ -74,39 +76,53 @@ func (e *Engine) Evaluate(ctx context.Context, normLog *logstructure.NormalizedL
 	e.rulesMutex.RLock()
 	defer e.rulesMutex.RUnlock()
 
+	var errs []error
 	for _, rule := range e.rules {
-		if err := e.evaluateRule(ctx, rule, normLog); err != nil {
-			log.Printf("Error evaluating rule %s: %v", rule.ID, err)
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("evaluate cancelled: %w", ctx.Err())
+		default:
+			if err := e.evaluateRule(ctx, rule, normLog); err != nil {
+				slog.Error("Error evaluating rule", "rule ID: ", rule.ID, "error", err)
+				errs = append(errs, fmt.Errorf("Evaluating rule error %w, rule ID %s", err, rule.ID))
+			}
 		}
+
 	}
-	return nil
+	return errors.Join(errs...)
 }
 
 // evaluateRule оценивает одно правило
 func (e *Engine) evaluateRule(ctx context.Context, rule *Rule, normLog *logstructure.NormalizedLog) error {
-	// Проверяем условия верхнего уровня (они же шаг 1 для sequence)
-	if !e.checkConditions(rule.Conditions, normLog) {
-		// Для sequence: даже если шаг 1 не совпал, проверяем промежуточные шаги
-		if rule.Aggregation != nil && rule.Aggregation.Type == AggregationSequence {
-			return e.handleSequenceIntermediateSteps(ctx, rule, normLog)
-		}
-		return nil
-	}
-
-	if rule.Aggregation == nil {
-		return e.triggerRule(ctx, rule, normLog, nil)
-	}
-
-	switch rule.Aggregation.Type {
-	case AggregationCount:
-		return e.handleCountAggregation(ctx, rule, normLog)
-	case AggregationThreshold:
-		return e.handleThresholdAggregation(ctx, rule, normLog)
-	case AggregationSequence:
-		return e.handleSequenceAggregation(ctx, rule, normLog)
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
 	default:
-		log.Printf("Unsupported aggregation type: %s", rule.Aggregation.Type)
-		return nil
+
+		// Проверяем условия верхнего уровня (они же шаг 1 для sequence)
+		if !e.checkConditions(rule.Conditions, normLog) {
+			// Для sequence: даже если шаг 1 не совпал, проверяем промежуточные шаги
+			if rule.Aggregation != nil && rule.Aggregation.Type == AggregationSequence {
+				return e.handleSequenceIntermediateSteps(ctx, rule, normLog)
+			}
+			return nil
+		}
+
+		if rule.Aggregation == nil {
+			return e.triggerRule(ctx, rule, normLog, nil)
+		}
+
+		switch rule.Aggregation.Type {
+		case AggregationCount:
+			return e.handleCountAggregation(ctx, rule, normLog)
+		case AggregationThreshold:
+			return e.handleThresholdAggregation(ctx, rule, normLog)
+		case AggregationSequence:
+			return e.handleSequenceAggregation(ctx, rule, normLog)
+		default:
+			slog.Error("Unsupported aggregation type", "type", rule.Aggregation.Type)
+			return fmt.Errorf("Unsupported aggregation type: %s", rule.Aggregation.Type)
+		}
 	}
 }
 
@@ -492,7 +508,6 @@ func (e *Engine) extractValueField(valueField string, normLog *logstructure.Norm
 }
 
 // extractJSONField извлекает значение вложенного JSON-поля.
-// Поддерживает однократную точку: "alert.severity", "net.bytes_toserver".
 func extractJSONField(jsonStr, path string) string {
 	var data map[string]interface{}
 	if err := json.Unmarshal([]byte(jsonStr), &data); err != nil {

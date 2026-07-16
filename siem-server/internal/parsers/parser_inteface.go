@@ -32,8 +32,8 @@ func NewParser() *Parser {
 	return mp
 }
 
-// Parser выбирает подходящий парсер на основе формата лога
-func (mp *Parser) Parser(raw *logstructure.RawLog) (*logstructure.NormalizedLog, error) {
+// Parse выбирает подходящий парсер на основе формата лога
+func (mp *Parser) Parse(raw *logstructure.RawLog) (*logstructure.NormalizedLog, error) {
 	parser, exists := mp.parsers[raw.Format]
 	if !exists {
 		return nil, fmt.Errorf("unsupported log format: %s", raw.Format)
