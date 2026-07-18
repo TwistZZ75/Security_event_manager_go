@@ -5,12 +5,27 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+const ruleSelectColumns = `
+    id,
+    name,
+    enabled,
+    severity,
+    rule_definition,
+    tags,
+    created_by,
+    created_at,
+    COALESCE(updated_by, '') AS updated_by,
+    updated_at,
+    last_triggered,
+    trigger_count
+`
 
 type RuleStorage struct {
 	pool *pgxpool.Pool
@@ -29,6 +44,9 @@ type RuleDefinition struct {
 
 // SaveRule сохраняет новое правило или обновляет существующее
 func (rst *RuleStorage) SaveRule(ctx context.Context, rule *Rule) error {
+	if rst.pool == nil {
+		return fmt.Errorf("database pool is nil")
+	}
 	// Сериализуем определение правила в JSONB
 	definition := RuleDefinition{
 		Conditions:  rule.Conditions,
@@ -38,7 +56,7 @@ func (rst *RuleStorage) SaveRule(ctx context.Context, rule *Rule) error {
 
 	definitionJSON, err := json.Marshal(definition)
 	if err != nil {
-		return fmt.Errorf("failed to marshal rule definition: %v", err)
+		return fmt.Errorf("failed to marshal rule definition: %w", err)
 	}
 
 	query := `
@@ -62,6 +80,10 @@ func (rst *RuleStorage) SaveRule(ctx context.Context, rule *Rule) error {
 		OR rules.rule_definition IS DISTINCT FROM EXCLUDED.rule_definition
 		OR rules.tags IS DISTINCT FROM EXCLUDED.tags
 	`
+	createdAt := rule.CreatedAt
+	if createdAt.IsZero() {
+		createdAt = time.Now()
+	}
 
 	_, err = rst.pool.Exec(ctx, query,
 		rule.ID,
@@ -71,12 +93,12 @@ func (rst *RuleStorage) SaveRule(ctx context.Context, rule *Rule) error {
 		definitionJSON,
 		rule.Tags,
 		rule.CreatedBy,
-		rule.CreatedAt,
+		createdAt,
 		time.Now(),
 	)
 
 	if err != nil {
-		return fmt.Errorf("failed to save rule: %v", err)
+		return fmt.Errorf("failed to save rule: %w", err)
 	}
 
 	return nil
@@ -88,14 +110,14 @@ func (rst *RuleStorage) SaveRule(ctx context.Context, rule *Rule) error {
 func (rst *RuleStorage) RemoveRule(ctx context.Context, id string) error {
 	//проверяем наличие соединений с БД
 	if rst.pool == nil {
-		log.Print("database pool is nil")
+		slog.Error("database pool is nil")
 		return fmt.Errorf("database pool is nil")
 	}
 
 	query := `DELETE FROM rules WHERE id = $1`
 	_, err := rst.pool.Exec(ctx, query, id)
 	if err != nil {
-		return fmt.Errorf("Unable to delete %v, %v", id, err)
+		return fmt.Errorf("Unable to delete %s, %w", id, err)
 	}
 	return nil
 }
@@ -106,31 +128,19 @@ func (rst *RuleStorage) RemoveRule(ctx context.Context, id string) error {
 func (rst *RuleStorage) GetAllRules(ctx context.Context) ([]*Rule, error) {
 	//проверяем наличие соединений с БД
 	if rst.pool == nil {
-		log.Print("database pool is nil")
+		slog.Error("database pool is nil")
 		return nil, fmt.Errorf("database pool is nil")
 	}
 	//запрос к бд
 	query := `
-        SELECT 
-            id,
-            name,
-            enabled,
-            severity,
-            rule_definition,
-            tags,
-            created_by,
-            created_at,
-			COALESCE(updated_by, 'noone') as updated_by,
-            updated_at,
-            last_triggered,
-            trigger_count
-        FROM rules
+        SELECT ` + ruleSelectColumns +
+		` FROM rules
         ORDER BY created_at DESC
     `
 	//получаем строки из бд согласно запросу
 	rows, err := rst.pool.Query(ctx, query)
 	if err != nil {
-		return nil, fmt.Errorf("Failed to query rules: %v", err)
+		return nil, fmt.Errorf("Failed to query rules: %w", err)
 	}
 	defer rows.Close()
 
@@ -141,7 +151,7 @@ func (rst *RuleStorage) GetAllRules(ctx context.Context) ([]*Rule, error) {
 	for rows.Next() {
 		rule, err := rst.ScanRule(rows)
 		if err != nil {
-			fmt.Printf("Failed to scan rule: %v\n", err)
+			slog.Error("Failed to scan rule", "error", err)
 			continue
 		}
 
@@ -149,7 +159,7 @@ func (rst *RuleStorage) GetAllRules(ctx context.Context) ([]*Rule, error) {
 	}
 
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("Error iterating rules: %v", err)
+		return nil, fmt.Errorf("Error iterating rules: %w", err)
 	}
 
 	return rulesList, nil
@@ -159,29 +169,19 @@ func (rst *RuleStorage) GetAllRules(ctx context.Context) ([]*Rule, error) {
 // принимает контекст и id правила
 // возвращает правило
 func (rst *RuleStorage) GetRule(ctx context.Context, id string) (*Rule, error) {
+	if rst.pool == nil {
+		return nil, fmt.Errorf("database pool is nil")
+	}
 
 	//запрос к бд
 	query := `
-        SELECT 
-            id,
-            name,
-            enabled,
-            severity,
-            rule_definition,
-            tags,
-            created_by,
-            created_at,
-            COALESCE(updated_by, '') AS updated_by,
-            updated_at,
-            last_triggered,
-            trigger_count
-        FROM rules
-        WHERE id = $1
-    `
+        SELECT ` + ruleSelectColumns +
+		` FROM rules
+        WHERE id = $1`
 	row := rst.pool.QueryRow(ctx, query, id)
 	rule, err := rst.ScanRule(row)
 	if err != nil {
-		return nil, fmt.Errorf("Failed to scan rule: %v \n", err)
+		return nil, fmt.Errorf("Failed to scan rule: %w", err)
 	}
 	return rule, nil
 }
@@ -228,13 +228,13 @@ func (rst *RuleStorage) ScanRule(scanner interface {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil // правило не найдено
 		}
-		return nil, fmt.Errorf("failed to scan rule row: %v", err)
+		return nil, fmt.Errorf("failed to scan rule row: %w", err)
 	}
 
 	// Десериализуем rule_definition из JSONB
 	var definition Rule
 	if err := json.Unmarshal(definitionJSON, &definition); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal rule definition for rule %s: %v", ruleID, err)
+		return nil, fmt.Errorf("failed to unmarshal rule definition for rule %s: %w", ruleID, err)
 	}
 
 	// Создаем объект Rule
@@ -273,7 +273,7 @@ func (rst *RuleStorage) GetRulesCount(ctx context.Context) (int, error) {
 	var count int
 	err := rst.pool.QueryRow(ctx, query).Scan(&count)
 	if err != nil {
-		return 0, fmt.Errorf("failed to count rules: %v", err)
+		return 0, fmt.Errorf("failed to count rules: %w", err)
 	}
 
 	return count, nil
@@ -298,19 +298,18 @@ func (rst *RuleStorage) GetEnabledRulesCount(ctx context.Context) (int, error) {
 }
 
 func (rst *RuleStorage) LoadEnabledRules(ctx context.Context) ([]*Rule, error) {
+	if rst.pool == nil {
+		return nil, fmt.Errorf("database pool is nil")
+	}
 	query := `
-		SELECT 
-			id, name, description, enabled, severity,
-			rule_definition, tags, created_by,
-			created_at, updated_at, last_triggered, trigger_count
-		FROM rules
+		SELECT ` + ruleSelectColumns +
+		` FROM rules
 		WHERE enabled = true
-		ORDER BY created_at DESC
-	`
+		ORDER BY created_at DESC`
 
 	rows, err := rst.pool.Query(ctx, query)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query enabled rules: %v", err)
+		return nil, fmt.Errorf("failed to query enabled rules: %w", err)
 	}
 	defer rows.Close()
 
@@ -319,29 +318,28 @@ func (rst *RuleStorage) LoadEnabledRules(ctx context.Context) ([]*Rule, error) {
 	for rows.Next() {
 		rule, err := rst.ScanRule(rows)
 		if err != nil {
-			fmt.Printf("Warning: failed to scan rule: %v\n", err)
+			slog.Warn("Failed to scan rule", "error", err)
 			continue
 		}
 		rulesList = append(rulesList, rule)
 	}
 
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating rules: %v", err)
+		return nil, fmt.Errorf("error iterating rules: %w", err)
 	}
 
 	return rulesList, nil
 }
 
 func (rst *RuleStorage) ListRules(ctx context.Context, filter RuleFilter) ([]*Rule, int64, error) {
+	if rst.pool == nil {
+		return nil, 0, fmt.Errorf("database pool is nil")
+	}
 	// Строим динамический запрос с фильтрами
 	query := `
-		SELECT 
-			id, name, description, enabled, severity,
-			rule_definition, tags, created_by,
-			created_at, updated_at, last_triggered, trigger_count
-		FROM rules
-		WHERE 1=1
-	`
+		SELECT ` + ruleSelectColumns +
+		` FROM rules
+		WHERE 1=1`
 	countQuery := `SELECT COUNT(*) FROM rules WHERE 1=1`
 
 	args := []interface{}{}
@@ -373,7 +371,7 @@ func (rst *RuleStorage) ListRules(ctx context.Context, filter RuleFilter) ([]*Ru
 	var total int64
 	err := rst.pool.QueryRow(ctx, countQuery, args...).Scan(&total)
 	if err != nil {
-		return nil, 0, fmt.Errorf("failed to count rules: %v", err)
+		return nil, 0, fmt.Errorf("failed to count rules: %w", err)
 	}
 
 	// Добавляем сортировку и лимиты
@@ -391,7 +389,7 @@ func (rst *RuleStorage) ListRules(ctx context.Context, filter RuleFilter) ([]*Ru
 	// Выполняем запрос
 	rows, err := rst.pool.Query(ctx, query, args...)
 	if err != nil {
-		return nil, 0, fmt.Errorf("failed to query rules: %v", err)
+		return nil, 0, fmt.Errorf("failed to query rules: %w", err)
 	}
 	defer rows.Close()
 
@@ -399,7 +397,7 @@ func (rst *RuleStorage) ListRules(ctx context.Context, filter RuleFilter) ([]*Ru
 	for rows.Next() {
 		rule, err := rst.ScanRule(rows)
 		if err != nil {
-			fmt.Printf("Warning: failed to scan rule: %v\n", err)
+			slog.Warn("failed to scan rule", "error", err)
 			continue
 		}
 		rulesList = append(rulesList, rule)
@@ -410,6 +408,9 @@ func (rst *RuleStorage) ListRules(ctx context.Context, filter RuleFilter) ([]*Ru
 
 // UpdateRuleTrigger обновляет статистику срабатывания правила
 func (rst *RuleStorage) UpdateRuleTrigger(ctx context.Context, id string) error {
+	if rst.pool == nil {
+		return fmt.Errorf("database pool is nil")
+	}
 	query := `
 		UPDATE rules 
 		SET last_triggered = $1,
@@ -419,7 +420,7 @@ func (rst *RuleStorage) UpdateRuleTrigger(ctx context.Context, id string) error 
 
 	_, err := rst.pool.Exec(ctx, query, time.Now(), id)
 	if err != nil {
-		return fmt.Errorf("failed to update rule trigger: %v", err)
+		return fmt.Errorf("failed to update rule trigger: %w", err)
 	}
 
 	return nil
@@ -427,6 +428,9 @@ func (rst *RuleStorage) UpdateRuleTrigger(ctx context.Context, id string) error 
 
 // SetRuleEnabled включает или отключает правило
 func (rst *RuleStorage) SetRuleEnabled(ctx context.Context, id string, enabled bool) error {
+	if rst.pool == nil {
+		return fmt.Errorf("database pool is nil")
+	}
 	query := `
 		UPDATE rules 
 		SET enabled = $1,
@@ -436,7 +440,7 @@ func (rst *RuleStorage) SetRuleEnabled(ctx context.Context, id string, enabled b
 
 	result, err := rst.pool.Exec(ctx, query, enabled, time.Now(), id)
 	if err != nil {
-		return fmt.Errorf("failed to set rule enabled status: %v", err)
+		return fmt.Errorf("failed to set rule enabled status: %w", err)
 	}
 
 	if result.RowsAffected() == 0 {

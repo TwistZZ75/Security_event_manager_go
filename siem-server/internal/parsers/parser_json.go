@@ -28,7 +28,7 @@ func NewSuricataParse() *ParseSuricataStruct {
 	return &ParseSuricataStruct{}
 }
 
-func (sur *ParseSuricataStruct) Parser(raw_log *logsstructure.RawLog) (*logsstructure.NormalizedLog, error) {
+func (sur *ParseSuricataStruct) Parse(raw_log *logsstructure.RawLog) (*logsstructure.NormalizedLog, error) {
 	var event SuricataEvent
 	err := json.Unmarshal([]byte(raw_log.Raw_data), &event)
 	if err != nil {

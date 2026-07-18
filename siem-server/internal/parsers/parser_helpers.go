@@ -5,10 +5,10 @@ import (
 	"strings"
 )
 
-// =============================================================================
-// Общие вспомогательные функции для всех парсеров.
-// Файл: siem-server/internal/parsers/parser_helpers.go
-// =============================================================================
+var (
+	reIp  = regexp.MustCompile(`from\s+(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})`)
+	rePam = regexp.MustCompile(`\(([^:)]+):`)
+)
 
 // containsAny возвращает true если src содержит хотя бы одну из подстрок subs.
 func containsAny(src string, subs ...string) bool {
@@ -41,8 +41,7 @@ func buildSuccessDesc(base, ip string) string {
 // extractIPFromMsg пытается найти IPv4-адрес в строке syslog/auth-лога.
 // sshd пишет: "Failed password for bob from 10.0.0.1 port 22"
 func extractIPFromMsg(msg string) string {
-	re := regexp.MustCompile(`from\s+(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})`)
-	if m := re.FindStringSubmatch(msg); len(m) > 1 {
+	if m := reIp.FindStringSubmatch(msg); len(m) > 1 {
 		return m[1]
 	}
 	return ""
@@ -50,11 +49,8 @@ func extractIPFromMsg(msg string) string {
 
 // extractServiceFromPAM извлекает имя сервиса из PAM-сообщения.
 // Формат: "pam_unix(sshd:session): session opened for user root by ..."
-//
-//	^^^^
 func extractServiceFromPAM(msg string) string {
-	re := regexp.MustCompile(`\(([^:)]+):`)
-	if m := re.FindStringSubmatch(msg); len(m) > 1 {
+	if m := rePam.FindStringSubmatch(msg); len(m) > 1 {
 		return strings.ToLower(m[1])
 	}
 	return ""

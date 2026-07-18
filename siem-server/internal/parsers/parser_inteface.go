@@ -9,7 +9,7 @@ import (
 // принимает "сырой" лог
 // возвращает нормализованный лог или ошибку
 type LogParser interface {
-	Parser(raw *logstructure.RawLog) (*logstructure.NormalizedLog, error)
+	Parse(raw *logstructure.RawLog) (*logstructure.NormalizedLog, error)
 	generateID(raw_log *logstructure.RawLog) string
 }
 
@@ -39,11 +39,11 @@ func (mp *Parser) Parse(raw *logstructure.RawLog) (*logstructure.NormalizedLog, 
 		return nil, fmt.Errorf("unsupported log format: %s", raw.Format)
 	}
 
-	return parser.Parser(raw)
+	return parser.Parse(raw)
 }
 
 // GenerateID делегирует генерацию ID соответствующему парсеру
-func (mp *Parser) GenerateID(raw_log *logstructure.RawLog) string {
+func (mp *Parser) generateID(raw_log *logstructure.RawLog) string {
 	parser, exists := mp.parsers[raw_log.Format]
 	if !exists {
 		return ""

@@ -13,7 +13,7 @@ func NewSquidParse() *ParseSquidStruct {
 	return &ParseSquidStruct{}
 }
 
-func (squid_p *ParseSquidStruct) Parser(raw_log *logstructure.RawLog) (*logstructure.NormalizedLog, error) {
+func (squid_p *ParseSquidStruct) Parse(raw_log *logstructure.RawLog) (*logstructure.NormalizedLog, error) {
 	NormalizedLog := &logstructure.NormalizedLog{
 		ID:        squid_p.generateID(raw_log),
 		PC_name:   raw_log.PC_name,

@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"siem-server/internal/logsstructure"
 	"time"
 
@@ -43,7 +44,7 @@ func (r *LogStorage) Store(ctx context.Context, entry *logsstructure.NormalizedL
 	`
 	// выполняем операцию Exec, игнорируем результат её выполнения, если он не ошибка
 	// если получаем ошибку, метод её вернёт, в противном случае он вернёт nil, если ошибок не было
-	_, error := r.pool.Exec(ctx, query,
+	tag, err := r.pool.Exec(ctx, query,
 		entry.ID,
 		entry.PC_name,
 		entry.Username,
@@ -56,7 +57,13 @@ func (r *LogStorage) Store(ctx context.Context, entry *logsstructure.NormalizedL
 		entry.Source,
 		entry.Raw_log,
 	)
-	return error //возвращаем ошибку или nil
+	if err != nil {
+		return fmt.Errorf("insert normalized event: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		slog.Warn("Duplicate event ignored", "event_id", entry.ID)
+	}
+	return err //возвращаем ошибку или nil
 }
 
 // scanLog сканирует одну строку результата в структуру NormalizedLog.
@@ -210,6 +217,7 @@ func (r *LogStorage) GetWithFilter(ctx context.Context, f logsstructure.LogFilte
 	if f.Offset > 0 {
 		query += fmt.Sprintf(" OFFSET $%d", pos)
 		args = append(args, f.Offset)
+		pos++
 	}
 
 	rows, err := r.pool.Query(ctx, query, args...)
@@ -362,7 +370,7 @@ func (r *LogStorage) collectRows(rows pgx.Rows) ([]*logsstructure.NormalizedLog,
 	for rows.Next() {
 		log, err := r.scanLog(rows)
 		if err != nil {
-			fmt.Printf("Warning: failed to scan log row: %v\n", err)
+			slog.Warn("Failed to scan log row", "error", err)
 			continue
 		}
 		logs = append(logs, log)

@@ -9,13 +9,25 @@ import (
 	"strings"
 )
 
-type ParseSyslogStruct struct{}
+var (
+	reSyslogMain   = regexp.MustCompile(`^(\S+)\s+(\S+)\s+([^\[:]+)(?:\[(\d+)\])?:\s+(.*)$`)
+	reUserSSH      = regexp.MustCompile(`(?:for|user)\s+(\S+)\s+(?:from|port)`)
+	reInvalidUser  = regexp.MustCompile(`(?i)invalid user\s+(\S+)`)
+	reSudoUser     = regexp.MustCompile(`^(\S+)\s+:`)
+	rePAMUser      = regexp.MustCompile(`for user\s+(\S+)`)
+	reSystemdUnit1 = regexp.MustCompile(`(?:Started|Stopped|Failed|Reloaded)\s+(.+?)\.?$`)
+	reSystemdUnit2 = regexp.MustCompile(`^([\w@.\\-]+\.service)`)
+	reLogindUser   = regexp.MustCompile(`of user\s+(\S+)`)
+	reOOMProcess   = regexp.MustCompile(`Kill(?:ed)? process \d+ \(([^)]+)\)`)
+)
 
-func NewSyslogParse() *ParseSyslogStruct {
-	return &ParseSyslogStruct{}
+type SyslogParser struct{}
+
+func NewSyslogParse() *SyslogParser {
+	return &SyslogParser{}
 }
 
-func (s *ParseSyslogStruct) Parser(raw_log *logstructure.RawLog) (*logstructure.NormalizedLog, error) {
+func (s *SyslogParser) Parse(raw_log *logstructure.RawLog) (*logstructure.NormalizedLog, error) {
 	entry := &logstructure.NormalizedLog{
 		ID:        s.generateID(raw_log),
 		PC_name:   raw_log.PC_name,
@@ -27,8 +39,7 @@ func (s *ParseSyslogStruct) Parser(raw_log *logstructure.RawLog) (*logstructure.
 	}
 
 	// Формат: timestamp hostname app[pid]: message
-	re := regexp.MustCompile(`^(\S+)\s+(\S+)\s+([^\[:]+)(?:\[(\d+)\])?:\s+(.*)$`)
-	m := re.FindStringSubmatch(raw_log.Raw_data)
+	m := reSyslogMain.FindStringSubmatch(raw_log.Raw_data)
 	if len(m) < 6 {
 		entry.Event_category = "System Event"
 		entry.Event_description = raw_log.Raw_data
@@ -66,7 +77,7 @@ func (s *ParseSyslogStruct) Parser(raw_log *logstructure.RawLog) (*logstructure.
 //	"OOM Killer", "Disk I/O", "Network Interface", etc.
 //
 // =============================================================================
-func (s *ParseSyslogStruct) categorize(app, msg string) (category, severity, description string) {
+func (s *SyslogParser) categorize(app, msg string) (category, severity, description string) {
 	appL := strings.ToLower(app)
 	msgL := strings.ToLower(msg)
 
@@ -346,7 +357,7 @@ func (s *ParseSyslogStruct) categorize(app, msg string) (category, severity, des
 	return "System Event", "Info", truncate(msg, 120)
 }
 
-func (s *ParseSyslogStruct) generateID(raw_log *logstructure.RawLog) string {
+func (s *SyslogParser) generateID(raw_log *logstructure.RawLog) string {
 	data := raw_log.Log_source + raw_log.PC_name + raw_log.Username + raw_log.Raw_data
 	h := sha256.Sum256([]byte(data))
 	return hex.EncodeToString(h[:])
@@ -366,13 +377,11 @@ func truncate(s string, n int) string {
 func extractUserFromSSHMsg(msg string) string {
 	// "Failed password for <user> from ..."
 	// "Accepted password for <user> from ..."
-	re := regexp.MustCompile(`(?:for|user)\s+(\S+)\s+(?:from|port)`)
-	if m := re.FindStringSubmatch(msg); len(m) > 1 && m[1] != "invalid" {
+	if m := reUserSSH.FindStringSubmatch(msg); len(m) > 1 && m[1] != "invalid" {
 		return m[1]
 	}
 	// "Invalid user <user> from ..."
-	re2 := regexp.MustCompile(`(?i)invalid user\s+(\S+)`)
-	if m := re2.FindStringSubmatch(msg); len(m) > 1 {
+	if m := reInvalidUser.FindStringSubmatch(msg); len(m) > 1 {
 		return m[1]
 	}
 	return ""
@@ -380,8 +389,7 @@ func extractUserFromSSHMsg(msg string) string {
 
 func extractSudoUser(msg string) string {
 	// Sudo log: "username : TTY=pts/0 ; PWD=/ ; USER=root ; COMMAND=..."
-	re := regexp.MustCompile(`^(\S+)\s+:`)
-	if m := re.FindStringSubmatch(msg); len(m) > 1 {
+	if m := reSudoUser.FindStringSubmatch(msg); len(m) > 1 {
 		return m[1]
 	}
 	return ""
@@ -402,8 +410,7 @@ func extractSudoCommand(msg string) string {
 
 func extractPAMUser(msg string) string {
 	// "session opened for user root by ..."
-	re := regexp.MustCompile(`for user\s+(\S+)`)
-	if m := re.FindStringSubmatch(msg); len(m) > 1 {
+	if m := rePAMUser.FindStringSubmatch(msg); len(m) > 1 {
 		return m[1]
 	}
 	return ""
@@ -411,13 +418,11 @@ func extractPAMUser(msg string) string {
 
 func extractSystemdUnit(msg string) string {
 	// "Started Apache HTTP Server." / "apache2.service: ..."
-	re := regexp.MustCompile(`(?:Started|Stopped|Failed|Reloaded)\s+(.+?)\.?$`)
-	if m := re.FindStringSubmatch(msg); len(m) > 1 {
+	if m := reSystemdUnit1.FindStringSubmatch(msg); len(m) > 1 {
 		return strings.TrimRight(m[1], ".")
 	}
 	// "unitname.service: ..."
-	re2 := regexp.MustCompile(`^([\w@.\\-]+\.service)`)
-	if m := re2.FindStringSubmatch(msg); len(m) > 1 {
+	if m := reSystemdUnit2.FindStringSubmatch(msg); len(m) > 1 {
 		return m[1]
 	}
 	return truncate(msg, 50)
@@ -425,19 +430,15 @@ func extractSystemdUnit(msg string) string {
 
 func extractLogindUser(msg string) string {
 	// "New session 5 of user root."
-	re := regexp.MustCompile(`of user\s+(\S+)`)
-	if m := re.FindStringSubmatch(msg); len(m) > 1 {
+	if m := reLogindUser.FindStringSubmatch(msg); len(m) > 1 {
 		return strings.TrimRight(m[1], ".")
 	}
 	return ""
 }
 
 func extractOOMProcess(msg string) string {
-	re := regexp.MustCompile(`Kill(?:ed)? process \d+ \(([^)]+)\)`)
-	if m := re.FindStringSubmatch(msg); len(m) > 1 {
+	if m := reOOMProcess.FindStringSubmatch(msg); len(m) > 1 {
 		return m[1]
 	}
 	return ""
 }
-
-// extractServiceFromPAM — объявлен в parser_authlog.go (один пакет)
