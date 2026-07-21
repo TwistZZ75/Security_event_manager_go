@@ -135,7 +135,7 @@ func (r *LogStorage) GetByID(ctx context.Context, id string) (*logsstructure.Nor
 		if err == pgx.ErrNoRows {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("failed to get log by id: %v", err)
+		return nil, fmt.Errorf("failed to get log by id: %w", err)
 	}
 	return log, nil
 }
@@ -222,7 +222,7 @@ func (r *LogStorage) GetWithFilter(ctx context.Context, f logsstructure.LogFilte
 
 	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query logs with filter: %v", err)
+		return nil, fmt.Errorf("failed to query logs with filter: %w", err)
 	}
 	defer rows.Close()
 

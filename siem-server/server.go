@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log"
+	"log/slog"
 	"net"
 	"os"
 	"os/signal"
@@ -76,6 +77,7 @@ func main() {
 	go func() {
 		defer wg.Done()
 		if err := grpcServ.Serve(listener); err != nil {
+			slog.Error("Failed to serve", "error", err)
 			log.Printf("Failed to serve: %v", err)
 		}
 	}()

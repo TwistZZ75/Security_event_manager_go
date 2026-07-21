@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -40,13 +41,11 @@ func (ss *StateStorage) GetState(ctx context.Context, ruleID, groupKey string) (
 		if err == pgx.ErrNoRows {
 			return nil, nil // Состояние не найдено - это нормально
 		}
-		return nil, fmt.Errorf("failed to get state: %v", err)
+		return nil, fmt.Errorf("failed to get state: %w", err)
 	}
 
 	// Проверяем, не истекло ли состояние
 	if time.Now().After(state.ExpiresAt) {
-		// Состояние истекло, удаляем его
-		ss.DeleteState(ctx, ruleID, groupKey)
 		return nil, nil
 	}
 
@@ -62,7 +61,7 @@ func (ss *StateStorage) DeleteState(ctx context.Context, ruleID, groupKey string
 
 	_, err := ss.pool.Exec(ctx, query, ruleID, groupKey)
 	if err != nil {
-		return fmt.Errorf("failed to delete state: %v", err)
+		return fmt.Errorf("failed to delete state: %w", err)
 	}
 
 	return nil
@@ -73,7 +72,7 @@ func (ss *StateStorage) SaveState(ctx context.Context, state *RuleState) error {
 	// Сериализуем state_data в JSONB
 	stateDataJSON, err := json.Marshal(state.StateData)
 	if err != nil {
-		return fmt.Errorf("failed to marshal state data: %v", err)
+		return fmt.Errorf("failed to marshal state data: %w", err)
 	}
 
 	query := `
@@ -105,7 +104,7 @@ func (ss *StateStorage) SaveState(ctx context.Context, state *RuleState) error {
 	).Scan(&state.ID)
 
 	if err != nil {
-		return fmt.Errorf("failed to save state: %v", err)
+		return fmt.Errorf("failed to save state: %w", err)
 	}
 
 	return nil
@@ -153,6 +152,10 @@ func (ss *StateStorage) IncrementCounter(ctx context.Context, ruleID, groupKey s
 			expires_at = CASE
 				WHEN rule_state.expires_at < $3 THEN $4
 				ELSE rule_state.expires_at
+			END,
+			state_data = CASE
+				WHEN rule_state.expires_at < $3 THEN '{}'::jsonb
+				ELSE rule_state.state_data
 			END
 		RETURNING id, counter, first_seen, last_seen, expires_at
 	`
@@ -189,7 +192,7 @@ func (ss *StateStorage) GetStatesByRule(ctx context.Context, ruleID string) ([]*
 
 	rows, err := ss.pool.Query(ctx, query, ruleID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query states: %v", err)
+		return nil, fmt.Errorf("failed to query states: %w", err)
 	}
 	defer rows.Close()
 
@@ -198,10 +201,14 @@ func (ss *StateStorage) GetStatesByRule(ctx context.Context, ruleID string) ([]*
 	for rows.Next() {
 		state, err := ss.scanState(rows)
 		if err != nil {
-			fmt.Printf("Warning: failed to scan state: %v\n", err)
+			slog.Warn("failed to scan state", "error", err)
 			continue
 		}
 		states = append(states, state)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating rows: %w", err)
 	}
 
 	return states, nil
@@ -220,7 +227,7 @@ func (ss *StateStorage) GetActiveStates(ctx context.Context) ([]*RuleState, erro
 
 	rows, err := ss.pool.Query(ctx, query, time.Now())
 	if err != nil {
-		return nil, fmt.Errorf("failed to query active states: %v", err)
+		return nil, fmt.Errorf("failed to query active states: %w", err)
 	}
 	defer rows.Close()
 
@@ -229,9 +236,13 @@ func (ss *StateStorage) GetActiveStates(ctx context.Context) ([]*RuleState, erro
 	for rows.Next() {
 		state, err := ss.scanState(rows)
 		if err != nil {
+			slog.Error("Scan state error", "error", err)
 			continue
 		}
 		states = append(states, state)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating rows: %w", err)
 	}
 
 	return states, nil
@@ -249,7 +260,7 @@ func (ss *StateStorage) ResetState(ctx context.Context, ruleID, groupKey string)
 
 	_, err := ss.pool.Exec(ctx, query, ruleID, groupKey, time.Now())
 	if err != nil {
-		return fmt.Errorf("failed to reset state: %v", err)
+		return fmt.Errorf("failed to reset state: %w", err)
 	}
 
 	return nil
@@ -266,7 +277,7 @@ func (ss *StateStorage) GetStateCount(ctx context.Context, ruleID string) (int64
 	var count int64
 	err := ss.pool.QueryRow(ctx, query, ruleID, time.Now()).Scan(&count)
 	if err != nil {
-		return 0, fmt.Errorf("failed to count states: %v", err)
+		return 0, fmt.Errorf("failed to count states: %w", err)
 	}
 
 	return count, nil
@@ -276,7 +287,7 @@ func (ss *StateStorage) GetStateCount(ctx context.Context, ruleID string) (int64
 func (ss *StateStorage) UpdateStateData(ctx context.Context, ruleID, groupKey string, stateData map[string]interface{}) error {
 	stateDataJSON, err := json.Marshal(stateData)
 	if err != nil {
-		return fmt.Errorf("failed to marshal state data: %v", err)
+		return fmt.Errorf("failed to marshal state data: %w", err)
 	}
 
 	query := `
@@ -287,7 +298,7 @@ func (ss *StateStorage) UpdateStateData(ctx context.Context, ruleID, groupKey st
 
 	_, err = ss.pool.Exec(ctx, query, ruleID, groupKey, stateDataJSON)
 	if err != nil {
-		return fmt.Errorf("failed to update state data: %v", err)
+		return fmt.Errorf("failed to update state data: %w", err)
 	}
 
 	return nil
@@ -305,27 +316,10 @@ func (ss *StateStorage) ExtendExpiration(ctx context.Context, ruleID, groupKey s
 
 	_, err := ss.pool.Exec(ctx, query, ruleID, groupKey, expiresAt)
 	if err != nil {
-		return fmt.Errorf("failed to extend expiration: %v", err)
+		return fmt.Errorf("failed to extend expiration: %w", err)
 	}
 
 	return nil
-}
-
-// запускает периодическую очистку истекших состояний
-func (ss *StateStorage) CleanupOldStates(ctx context.Context, interval time.Duration) {
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			if err := ss.DeleteExpiredStates(ctx); err != nil {
-				fmt.Printf("Failed to cleanup expired states: %v\n", err)
-			}
-		case <-ctx.Done():
-			return
-		}
-	}
 }
 
 // удаляет все истекшие состояния
@@ -338,12 +332,12 @@ func (ss *StateStorage) DeleteExpiredStates(ctx context.Context) error {
 
 	result, err := ss.pool.Exec(ctx, query, time.Now())
 	if err != nil {
-		return fmt.Errorf("failed to delete expired states: %v", err)
+		return fmt.Errorf("failed to delete expired states: %w", err)
 	}
 
 	rowsAffected := result.RowsAffected()
 	if rowsAffected > 0 {
-		fmt.Printf("Deleted %d expired rule states\n", rowsAffected)
+		slog.Info("Deleted expired rule states", "number of deleted states", rowsAffected)
 	}
 
 	return nil
@@ -374,7 +368,7 @@ func (ss *StateStorage) GetStatsForRule(ctx context.Context, ruleID string) (*St
 	)
 
 	if err != nil {
-		return nil, fmt.Errorf("failed to get state stats: %v", err)
+		return nil, fmt.Errorf("failed to get state stats: %w", err)
 	}
 
 	return &stats, nil
@@ -407,14 +401,14 @@ func (ss *StateStorage) scanState(scanner interface {
 	)
 
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("Rule state scan error %w", err)
 	}
 
 	// Десериализуем state_data
 	var stateData map[string]interface{}
 	if len(stateDataJSON) > 0 {
 		if err := json.Unmarshal(stateDataJSON, &stateData); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal state data: %v", err)
+			return nil, fmt.Errorf("failed to unmarshal state data: %w", err)
 		}
 	}
 

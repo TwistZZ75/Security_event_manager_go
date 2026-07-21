@@ -3,11 +3,13 @@ package actions
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"siem-server/alerts"
 	"siem-server/rules"
 	"time"
 )
+
+//TODO: перенести все экзекьютеры в отдельные файлы
 
 // Dispatcher управляет выполнением действий
 type Dispatcher struct {
@@ -61,12 +63,19 @@ func NewDispatcher(actionLog ActionLogger, agentComm AgentCommunicator, notifier
 
 // RegisterExecutor регистрирует исполнителя действия
 func (d *Dispatcher) RegisterExecutor(executor Executor) {
+	if executor == nil {
+		slog.Warn("Attempted to register nil executor")
+		return
+	}
 	d.executors[executor.GetType()] = executor
-	log.Printf("Registered action executor: %s", executor.GetType())
+	slog.Info("Registered action executor", "executor type", executor.GetType())
 }
 
 // Execute выполняет действие
 func (d *Dispatcher) Execute(ctx context.Context, alert *alerts.Alert, action rules.Action) error {
+	if d.agentComm == nil {
+		return fmt.Errorf("agent communicator is not configured")
+	}
 	executor, exists := d.executors[action.Type]
 	if !exists {
 		return fmt.Errorf("unknown action type: %s", action.Type)
@@ -83,7 +92,7 @@ func (d *Dispatcher) Execute(ctx context.Context, alert *alerts.Alert, action ru
 	}
 
 	if err := d.actionLog.LogAction(ctx, actionLog); err != nil {
-		log.Printf("Failed to log action: %v", err)
+		slog.Warn("Failed to log action", "error", err)
 		// Продолжаем выполнение
 	}
 
@@ -94,15 +103,15 @@ func (d *Dispatcher) Execute(ctx context.Context, alert *alerts.Alert, action ru
 	if err != nil {
 		actionLog.Status = ActionStatusFailed
 		actionLog.Error = err.Error()
-		log.Printf("✗ Action %s failed for alert %d: %v", action.Type, alert.ID, err)
+		slog.Warn("Action failed for alert", "action_type", action.Type, "alert_id", alert.ID, "error", err)
 	} else {
 		actionLog.Status = ActionStatusSuccess
 		actionLog.Result = "Action executed successfully"
-		log.Printf("✓ Action %s succeeded for alert %d", action.Type, alert.ID)
+		slog.Info("Action succeeded for alert", "action_type", action.Type, "alert_id", alert.ID)
 	}
 
 	if logErr := d.actionLog.LogAction(ctx, actionLog); logErr != nil {
-		log.Printf("Failed to update action log: %v", logErr)
+		slog.Error("Failed to update action log", "error", logErr)
 	}
 
 	return err
@@ -166,6 +175,9 @@ func (ne *NotifyExecutor) GetType() string {
 }
 
 func (ne *NotifyExecutor) Execute(ctx context.Context, alert *alerts.Alert, params map[string]interface{}) error {
+	if ne.notifier == nil {
+		return fmt.Errorf("notifier is not configured")
+	}
 	// Определяем каналы для отправки
 	channels := []string{}
 
@@ -190,10 +202,10 @@ func (ne *NotifyExecutor) Execute(ctx context.Context, alert *alerts.Alert, para
 
 	// Отправляем уведомление
 	if err := ne.notifier.SendNotification(ctx, alert, channels); err != nil {
-		return fmt.Errorf("failed to send notification: %v", err)
+		return fmt.Errorf("failed to send notification: %w", err)
 	}
 
-	log.Printf("✓ Notification sent for alert %d via channels: %v", alert.ID, channels)
+	slog.Info("Notification sent for alert via channels", "alert_id", alert.ID, "channels", channels)
 	return nil
 }
 
@@ -214,6 +226,9 @@ func (bae *BlockAccountExecutor) GetType() string {
 }
 
 func (bae *BlockAccountExecutor) Execute(ctx context.Context, alert *alerts.Alert, params map[string]interface{}) error {
+	if bae.agentComm == nil {
+		return fmt.Errorf("agent communicator is not configured")
+	}
 	username := getStringFromEventData(alert.EventData, "username")
 	host := getStringFromEventData(alert.EventData, "pc_name")
 
@@ -236,10 +251,10 @@ func (bae *BlockAccountExecutor) Execute(ctx context.Context, alert *alerts.Aler
 	}
 
 	if err := bae.agentComm.SendCommand(ctx, host, command); err != nil {
-		return fmt.Errorf("failed to send block account command: %v", err)
+		return fmt.Errorf("failed to send block account command: %w", err)
 	}
 
-	log.Printf("Block account command sent for user %s on host %s", username, host)
+	slog.Info("Block account command sent for user on host", "username", username, "host", host)
 	return nil
 }
 
@@ -260,6 +275,9 @@ func (uae *UnblockAccountExecutor) GetType() string {
 }
 
 func (uae *UnblockAccountExecutor) Execute(ctx context.Context, alert *alerts.Alert, params map[string]interface{}) error {
+	if uae.agentComm == nil {
+		return fmt.Errorf("agent communicator is not configured")
+	}
 	// Получаем username из параметров или из alert
 	username := ""
 	if u, ok := params["username"]; ok {
@@ -293,10 +311,10 @@ func (uae *UnblockAccountExecutor) Execute(ctx context.Context, alert *alerts.Al
 	}
 
 	if err := uae.agentComm.SendCommand(ctx, host, command); err != nil {
-		return fmt.Errorf("failed to send unblock account command: %v", err)
+		return fmt.Errorf("failed to send unblock account command: %w", err)
 	}
 
-	log.Printf("✓ Unblock account command sent for user %s on host %s", username, host)
+	slog.Info("Unblock account command sent for user on host", "username", username, "host", host)
 	return nil
 }
 
@@ -317,6 +335,9 @@ func (bne *BlockNetworkExecutor) GetType() string {
 }
 
 func (bne *BlockNetworkExecutor) Execute(ctx context.Context, alert *alerts.Alert, params map[string]interface{}) error {
+	if bne.agentComm == nil {
+		return fmt.Errorf("agent communicator is not configured")
+	}
 	host := getStringFromEventData(alert.EventData, "pc_name")
 
 	if host == "unknown" {
@@ -337,10 +358,10 @@ func (bne *BlockNetworkExecutor) Execute(ctx context.Context, alert *alerts.Aler
 	}
 
 	if err := bne.agentComm.SendCommand(ctx, host, command); err != nil {
-		return fmt.Errorf("failed to send block network command: %v", err)
+		return fmt.Errorf("failed to send block network command: %w", err)
 	}
 
-	log.Printf("Block network command sent to host %s", host)
+	slog.Info("Block network command sent to host", "host", host)
 	return nil
 }
 
@@ -361,6 +382,9 @@ func (une *UnblockNetworkExecutor) GetType() string {
 }
 
 func (une *UnblockNetworkExecutor) Execute(ctx context.Context, alert *alerts.Alert, params map[string]interface{}) error {
+	if une.agentComm == nil {
+		return fmt.Errorf("agent communicator is not configured")
+	}
 	// Получаем host из параметров или из alert
 	host := ""
 	if h, ok := params["host"]; ok {
@@ -380,10 +404,10 @@ func (une *UnblockNetworkExecutor) Execute(ctx context.Context, alert *alerts.Al
 	}
 
 	if err := une.agentComm.SendCommand(ctx, host, command); err != nil {
-		return fmt.Errorf("failed to send unblock network command: %v", err)
+		return fmt.Errorf("failed to send unblock network command: %w", err)
 	}
 
-	log.Printf("✓ Unblock network command sent to host %s", host)
+	slog.Info("Unblock network command sent to host", "host", host)
 	return nil
 }
 
@@ -404,6 +428,9 @@ func (kpe *KillProcessExecutor) GetType() string {
 }
 
 func (kpe *KillProcessExecutor) Execute(ctx context.Context, alert *alerts.Alert, params map[string]interface{}) error {
+	if kpe.agentComm == nil {
+		return fmt.Errorf("agent communicator is not configured")
+	}
 	processName := getStringFromEventData(alert.EventData, "process_name")
 	host := getStringFromEventData(alert.EventData, "pc_name")
 
@@ -420,9 +447,9 @@ func (kpe *KillProcessExecutor) Execute(ctx context.Context, alert *alerts.Alert
 	}
 
 	if err := kpe.agentComm.SendCommand(ctx, host, command); err != nil {
-		return fmt.Errorf("failed to send kill process command: %v", err)
+		return fmt.Errorf("failed to send kill process command: %w", err)
 	}
 
-	log.Printf("Kill process command sent for process %s on host %s", processName, host)
+	slog.Info("Kill process command sent for process on host", "process_name", processName, "host", host)
 	return nil
 }
