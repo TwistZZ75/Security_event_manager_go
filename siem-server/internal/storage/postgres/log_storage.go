@@ -63,7 +63,7 @@ func (r *LogStorage) Store(ctx context.Context, entry *logsstructure.NormalizedL
 	if tag.RowsAffected() == 0 {
 		slog.Warn("Duplicate event ignored", "event_id", entry.ID)
 	}
-	return err //возвращаем ошибку или nil
+	return nil
 }
 
 // scanLog сканирует одну строку результата в структуру NormalizedLog.
@@ -99,7 +99,7 @@ func (r *LogStorage) scanLog(scanner interface {
 		&rawLog,
 	)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("scan log error: %w", err)
 	}
 
 	return &logsstructure.NormalizedLog{
@@ -121,12 +121,16 @@ func (r *LogStorage) scanLog(scanner interface {
 const baseSelect = `
 	SELECT id, pc_name, username, event_description, event_category,
 	       process_name, severity, timestamp, os, source, raw_log
-	FROM normalized_events
-`
+	FROM normalized_events `
 
 // GetByID возвращает один лог по его id (sha256-хеш).
 // Если лог не найден — возвращает nil, nil.
 func (r *LogStorage) GetByID(ctx context.Context, id string) (*logsstructure.NormalizedLog, error) {
+	//проверка существования пула соединений с БД
+	if r.pool == nil {
+		return nil, fmt.Errorf("database pool is nil")
+	}
+
 	query := baseSelect + `WHERE id = $1`
 
 	row := r.pool.QueryRow(ctx, query, id)
@@ -149,11 +153,16 @@ func (r *LogStorage) GetAll(ctx context.Context) ([]*logsstructure.NormalizedLog
 
 // GetRecent возвращает последние N логов (новые первыми).
 func (r *LogStorage) GetRecent(ctx context.Context, limit int) ([]*logsstructure.NormalizedLog, error) {
+	//проверка существования пула соединений с БД
+	if r.pool == nil {
+		return nil, fmt.Errorf("database pool is nil")
+	}
+
 	query := baseSelect + `ORDER BY timestamp DESC LIMIT $1`
 
 	rows, err := r.pool.Query(ctx, query, limit)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query recent logs: %v", err)
+		return nil, fmt.Errorf("failed to query recent logs: %w", err)
 	}
 	defer rows.Close()
 
@@ -162,6 +171,11 @@ func (r *LogStorage) GetRecent(ctx context.Context, limit int) ([]*logsstructure
 
 // GetWithFilter возвращает логи с учётом фильтра и пагинации.
 func (r *LogStorage) GetWithFilter(ctx context.Context, f logsstructure.LogFilter) ([]*logsstructure.NormalizedLog, error) {
+	//проверка существования пула соединений с БД
+	if r.pool == nil {
+		return nil, fmt.Errorf("database pool is nil")
+	}
+
 	query := baseSelect + `WHERE 1=1`
 	args := []interface{}{}
 	pos := 1
@@ -231,16 +245,26 @@ func (r *LogStorage) GetWithFilter(ctx context.Context, f logsstructure.LogFilte
 
 // Count возвращает общее количество логов в таблице.
 func (r *LogStorage) Count(ctx context.Context) (int64, error) {
+	//проверка существования пула соединений с БД
+	if r.pool == nil {
+		return 0, fmt.Errorf("database pool is nil")
+	}
+
 	var count int64
 	err := r.pool.QueryRow(ctx, `SELECT COUNT(*) FROM normalized_events`).Scan(&count)
 	if err != nil {
-		return 0, fmt.Errorf("failed to count logs: %v", err)
+		return 0, fmt.Errorf("failed to count logs: %w", err)
 	}
 	return count, nil
 }
 
 // CountBySeverity возвращает карту severity → количество записей.
 func (r *LogStorage) CountBySeverity(ctx context.Context) (map[string]int64, error) {
+	//проверка существования пула соединений с БД
+	if r.pool == nil {
+		return nil, fmt.Errorf("database pool is nil")
+	}
+
 	query := `
 		SELECT severity, COUNT(*) 
 		FROM normalized_events 
@@ -249,7 +273,7 @@ func (r *LogStorage) CountBySeverity(ctx context.Context) (map[string]int64, err
 
 	rows, err := r.pool.Query(ctx, query)
 	if err != nil {
-		return nil, fmt.Errorf("failed to count by severity: %v", err)
+		return nil, fmt.Errorf("failed to count by severity: %w", err)
 	}
 	defer rows.Close()
 
@@ -258,6 +282,7 @@ func (r *LogStorage) CountBySeverity(ctx context.Context) (map[string]int64, err
 		var sev string
 		var cnt int64
 		if err := rows.Scan(&sev, &cnt); err != nil {
+			slog.Warn("row scan error", "error", err)
 			continue
 		}
 		result[sev] = cnt
@@ -267,6 +292,11 @@ func (r *LogStorage) CountBySeverity(ctx context.Context) (map[string]int64, err
 
 // CountByCategory возвращает карту event_category → количество записей.
 func (r *LogStorage) CountByCategory(ctx context.Context) (map[string]int64, error) {
+	//проверка существования пула соединений с БД
+	if r.pool == nil {
+		return nil, fmt.Errorf("database pool is nil")
+	}
+
 	query := `
 		SELECT event_category, COUNT(*) 
 		FROM normalized_events 
@@ -276,7 +306,7 @@ func (r *LogStorage) CountByCategory(ctx context.Context) (map[string]int64, err
 
 	rows, err := r.pool.Query(ctx, query)
 	if err != nil {
-		return nil, fmt.Errorf("failed to count by category: %v", err)
+		return nil, fmt.Errorf("failed to count by category: %w", err)
 	}
 	defer rows.Close()
 
@@ -294,6 +324,11 @@ func (r *LogStorage) CountByCategory(ctx context.Context) (map[string]int64, err
 
 // CountBySource возвращает карту source → количество записей.
 func (r *LogStorage) CountBySource(ctx context.Context) (map[string]int64, error) {
+	//проверка существования пула соединений с БД
+	if r.pool == nil {
+		return nil, fmt.Errorf("database pool is nil")
+	}
+
 	query := `
 		SELECT source, COUNT(*) 
 		FROM normalized_events 
@@ -303,7 +338,7 @@ func (r *LogStorage) CountBySource(ctx context.Context) (map[string]int64, error
 
 	rows, err := r.pool.Query(ctx, query)
 	if err != nil {
-		return nil, fmt.Errorf("failed to count by source: %v", err)
+		return nil, fmt.Errorf("failed to count by source: %w", err)
 	}
 	defer rows.Close()
 
@@ -342,13 +377,18 @@ func (r *LogStorage) GetInTimeRange(ctx context.Context, from, to time.Time, lim
 // DeleteOlderThan удаляет логи старше указанного срока.
 // Возвращает количество удалённых строк.
 func (r *LogStorage) DeleteOlderThan(ctx context.Context, olderThan time.Duration) (int64, error) {
+	//проверка существования пула соединений с БД
+	if r.pool == nil {
+		return 0, fmt.Errorf("database pool is nil")
+	}
+
 	cutoff := time.Now().Add(-olderThan)
 	result, err := r.pool.Exec(ctx,
 		`DELETE FROM normalized_events WHERE timestamp < $1`,
 		cutoff,
 	)
 	if err != nil {
-		return 0, fmt.Errorf("failed to delete old logs: %v", err)
+		return 0, fmt.Errorf("failed to delete old logs: %w", err)
 	}
 	return result.RowsAffected(), nil
 }
@@ -357,7 +397,7 @@ func (r *LogStorage) DeleteOlderThan(ctx context.Context, olderThan time.Duratio
 func (r *LogStorage) queryMany(ctx context.Context, query string, args ...interface{}) ([]*logsstructure.NormalizedLog, error) {
 	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("query failed: %v", err)
+		return nil, fmt.Errorf("query failed: %w", err)
 	}
 	defer rows.Close()
 	return r.collectRows(rows)
@@ -377,7 +417,7 @@ func (r *LogStorage) collectRows(rows pgx.Rows) ([]*logsstructure.NormalizedLog,
 	}
 
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating log rows: %v", err)
+		return nil, fmt.Errorf("error iterating log rows: %w", err)
 	}
 
 	return logs, nil

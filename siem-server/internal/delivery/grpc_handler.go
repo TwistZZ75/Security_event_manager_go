@@ -34,7 +34,7 @@ func (handler *LogHandler) SendRawLog(ctx context.Context, req *pb.RequestRawLog
 	timestamp, err := time.Parse(time.RFC3339, req.Timestamp)
 	if err != nil {
 		slog.Warn("invalid timestamp", "error", err, "timestamp", req.Timestamp)
-		return nil, status.Errorf(codes.InvalidArgument, "invalid timestamp: %w", err)
+		return nil, status.Errorf(codes.InvalidArgument, "invalid timestamp: %v", err)
 	}
 	raw := &logstructure.RawLog{
 		Username:        req.Username,
@@ -49,7 +49,7 @@ func (handler *LogHandler) SendRawLog(ctx context.Context, req *pb.RequestRawLog
 	//вызов функции обработки лога (его парсинга и сохранения в бд)
 	if err := handler.processor.ProcessLog(ctx, raw); err != nil {
 		slog.Error("failed to process log", "error", err)
-		return nil, status.Errorf(codes.Internal, "processing failed: %w", err)
+		return nil, status.Errorf(codes.Internal, "processing failed: %v", err)
 	}
 
 	//присылаем ответ об успешной обработке клиенту
