@@ -2,8 +2,10 @@ package alerts
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"log"
+	"log/slog"
+	"strings"
 	"time"
 )
 
@@ -30,7 +32,7 @@ func NewAlertManager(storage *AlertStorage, notifier Notifier) *AlertManager {
 func (am *AlertManager) CreateAlert(ctx context.Context, alert *Alert) error {
 	// Валидация
 	if err := am.validateAlert(alert); err != nil {
-		return fmt.Errorf("invalid alert: %v", err)
+		return fmt.Errorf("invalid alert: %w", err)
 	}
 
 	// Устанавливаем значения по умолчанию
@@ -40,23 +42,26 @@ func (am *AlertManager) CreateAlert(ctx context.Context, alert *Alert) error {
 
 	// Сохраняем в БД
 	if err := am.storage.CreateAlert(ctx, alert); err != nil {
-		return fmt.Errorf("failed to create alert: %v", err)
+		return fmt.Errorf("failed to create alert: %w", err)
 	}
 
-	log.Printf("Alert created: ID=%d, Rule=%s, Severity=%s", alert.ID, alert.RuleName, alert.Severity)
+	slog.Info("Alert created", "alert_id", alert.ID, "rule", alert.RuleName, "severity", alert.Severity)
+
+	var errs []error
 
 	// Отправляем уведомление
 	if am.notifier != nil {
 		channels := am.getNotificationChannels(alert.Severity)
 		if len(channels) > 0 {
 			if err := am.notifier.SendNotification(ctx, alert, channels); err != nil {
-				log.Printf("Warning: failed to send notification for alert %d: %v", alert.ID, err)
+				slog.Warn("Warning: failed to send notification for alert", "alert_id", alert.ID, "error", err)
 				// Не прерываем создание алерта из-за ошибки уведомления
+				errs = append(errs, err)
 			}
 		}
 	}
 
-	return nil
+	return errors.Join(errs...)
 }
 
 // GetAlert получает алерт по ID
@@ -91,6 +96,8 @@ func (am *AlertManager) validateAlert(alert *Alert) error {
 		return fmt.Errorf("severity is required")
 	}
 
+	lowerRegister := strings.ToLower(alert.Severity)
+
 	// Проверяем корректность severity
 	validSeverities := map[string]bool{
 		"low":      true,
@@ -98,7 +105,7 @@ func (am *AlertManager) validateAlert(alert *Alert) error {
 		"high":     true,
 		"critical": true,
 	}
-	if !validSeverities[alert.Severity] {
+	if !validSeverities[lowerRegister] {
 		return fmt.Errorf("invalid severity: %s", alert.Severity)
 	}
 
@@ -107,6 +114,7 @@ func (am *AlertManager) validateAlert(alert *Alert) error {
 
 // getNotificationChannels определяет каналы уведомлений на основе severity
 func (am *AlertManager) getNotificationChannels(severity string) []string {
+	severity = strings.ToLower(severity)
 	switch severity {
 	case "critical":
 		return []string{"email", "telegram"}

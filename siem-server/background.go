@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"log"
 	"log/slog"
 	webserver "siem-server/web_server"
 	"sync"
@@ -34,7 +33,7 @@ func StartRuleEngine(ctx context.Context, cancel func(), services *Services, sto
 		slog.Error("Counting rules error", "error", err)
 		cancel()
 	}
-	log.Printf("Rule Engine initialized with %d enabled rules", ruleCount)
+	slog.Info("Rule Engine initialized", "number of enabled rules", ruleCount)
 
 }
 

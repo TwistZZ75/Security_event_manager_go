@@ -87,11 +87,23 @@ type Services struct {
 // возвращает объект сервиса
 func InitServices(storages *Storages) *Services {
 	jwtService := users.NewJWTService()
+	emailCfg := actions.EmailNotifier{
+		SmtpHost:     os.Getenv("SMTP_HOST"),
+		SmtpPort:     os.Getenv("SMTP_PORT"),
+		SmtpUser:     os.Getenv("SMTP_USER"),
+		SmtpPassword: os.Getenv("SMTP_PASSWORD"),
+		FromEmail:    os.Getenv("SMTP_FROM"),
+		ToEmails:     []string{os.Getenv("ALERT_EMAIL")},
+	}
+	telegramCfg := actions.TelegramNotifier{
+		BotToken: os.Getenv("TELEGRAM_BOT_TOKEN"),
+		ChatID:   os.Getenv("TELEGRAM_CHAT_ID"),
+	}
 	userHandler := users.NewHandler(storages.UserStorage, jwtService)
-	notifier := actions.NewMultiNotifier()
+	multiNotifier := actions.NewMultiNotifier(&emailCfg, &telegramCfg)
 	agentCommunicator := actions.NewGRPCAgentComm(storages.CommandQueueStorage)
-	alertMgr := alerts.NewAlertManager(storages.AlertStorage, notifier)
-	actionDsp := actions.NewDispatcher(storages.ActionStorage, agentCommunicator, notifier)
+	alertMgr := alerts.NewAlertManager(storages.AlertStorage, multiNotifier)
+	actionDsp := actions.NewDispatcher(storages.ActionStorage, agentCommunicator, multiNotifier)
 	ruleEngine := rules.NewEngine(
 		storages.RuleStorage,
 		alertMgr,
@@ -106,7 +118,7 @@ func InitServices(storages *Storages) *Services {
 	return &Services{
 		JwtService:    jwtService,
 		UserHandler:   userHandler,
-		Notifier:      notifier,
+		Notifier:      multiNotifier,
 		AgentCommands: agentCommunicator,
 		AlertMgr:      alertMgr,
 		ActionDisp:    actionDsp,

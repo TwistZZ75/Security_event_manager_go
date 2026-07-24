@@ -324,7 +324,7 @@ func (ws *WebServer) handleGetEvents(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	logs, err := ws.LogStorage.GetRecent(ctx, limit)
+	logs, err := ws.logStorage.GetRecent(ctx, limit)
 	if err != nil {
 		log.Printf("handleGetEvents: %v", err)
 		respondWithError(w, http.StatusInternalServerError, "Failed to fetch events")

@@ -1,6 +1,7 @@
 package users
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -270,7 +271,7 @@ func (h *Handler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 }
 
 // issueTokens — создаёт пару access+refresh токенов и сохраняет refresh в БД
-func (h *Handler) issueTokens(ctx interface{ Done() <-chan struct{} }, user *User) (*TokenPair, error) {
+func (h *Handler) issueTokens(ctx context.Context, user *User) (*TokenPair, error) {
 	accessToken, err := h.jwt.GenerateAccessToken(user)
 	if err != nil {
 		return nil, fmt.Errorf("ошибка генерации access token: %w", err)
