@@ -3,7 +3,7 @@ package users
 import (
 	"errors"
 	"fmt"
-	"os"
+	"log/slog"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -24,9 +24,12 @@ type JWTService struct {
 	secret []byte
 }
 
-func NewJWTService() *JWTService {
-	secret := os.Getenv("JWT_SECRET")
-	return &JWTService{secret: []byte(secret)}
+func NewJWTService(jwtSecret string) (*JWTService, error) {
+	if len(jwtSecret) == 0 {
+		slog.Error("jwt secret is empty")
+		return nil, fmt.Errorf("jwt secret lenth is 0")
+	}
+	return &JWTService{secret: []byte(jwtSecret)}, nil
 }
 
 // GenerateAccessToken — создаёт JWT access token (15 мин)
@@ -46,7 +49,7 @@ func (j *JWTService) GenerateAccessToken(user *User) (string, error) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	signed, err := token.SignedString(j.secret)
 	if err != nil {
-		return "", fmt.Errorf("ошибка подписи токена: %w", err)
+		return "", fmt.Errorf("sign token error: %w", err)
 	}
 	return signed, nil
 }
@@ -55,7 +58,7 @@ func (j *JWTService) GenerateAccessToken(user *User) (string, error) {
 func (j *JWTService) ValidateAccessToken(tokenStr string) (*JWTClaims, error) {
 	token, err := jwt.ParseWithClaims(tokenStr, &JWTClaims{}, func(t *jwt.Token) (interface{}, error) {
 		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, fmt.Errorf("неожиданный метод подписи: %v", t.Header["alg"])
+			return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
 		}
 		return j.secret, nil
 	})

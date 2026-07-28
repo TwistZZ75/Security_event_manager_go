@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"log/slog"
 	"os"
 	"siem-server/actions"
 	"siem-server/agent"
@@ -85,8 +86,12 @@ type Services struct {
 // функция инициализации сервисов и хендлеров
 // принимает объект хранилища
 // возвращает объект сервиса
-func InitServices(storages *Storages) *Services {
-	jwtService := users.NewJWTService()
+func InitServices(storages *Storages) (*Services, error) {
+	jwtService, err := users.NewJWTService(os.Getenv("JWT_SECRET"))
+	if err != nil {
+		slog.Error("jwt service error", "error", err)
+		return nil, fmt.Errorf("jwt service error %w", err)
+	}
 	emailCfg := actions.EmailNotifier{
 		SmtpHost:     os.Getenv("SMTP_HOST"),
 		SmtpPort:     os.Getenv("SMTP_PORT"),
@@ -127,5 +132,5 @@ func InitServices(storages *Storages) *Services {
 		LogProc:       logProc,
 		LogHandler:    logHandler,
 		AgentHandler:  agentHandler,
-	}
+	}, nil
 }

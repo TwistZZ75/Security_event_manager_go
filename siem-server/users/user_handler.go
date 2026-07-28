@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 
@@ -31,23 +32,23 @@ func (h *Handler) RegisterRoutes(
 	adminOnly func(http.Handler) http.Handler,
 ) {
 	// Публичные маршруты
-	api.Handle("/auth/register", h.wrapPublic(h.Register)).Methods("POST", "OPTIONS")
-	api.Handle("/auth/login", h.wrapPublic(h.Login)).Methods("POST", "OPTIONS")
-	api.Handle("/auth/refresh", h.wrapPublic(h.Refresh)).Methods("POST", "OPTIONS")
+	api.Handle("/auth/register", h.wrapPublic(h.Register)).Methods("POST")
+	api.Handle("/auth/login", h.wrapPublic(h.Login)).Methods("POST")
+	api.Handle("/auth/refresh", h.wrapPublic(h.Refresh)).Methods("POST")
 
 	// Требуют валидного токена
 	protected := api.PathPrefix("").Subrouter()
 	protected.Use(authRequired)
-	protected.HandleFunc("/auth/logout", h.Logout).Methods("POST", "OPTIONS")
-	protected.HandleFunc("/auth/me", h.Me).Methods("GET", "OPTIONS")
+	protected.HandleFunc("/auth/logout", h.Logout).Methods("POST")
+	protected.HandleFunc("/auth/me", h.Me).Methods("GET")
 
 	// Только admin
 	admin := protected.PathPrefix("").Subrouter()
 	admin.Use(adminOnly)
-	admin.HandleFunc("/users", h.ListUsers).Methods("GET", "OPTIONS")
-	admin.HandleFunc("/users/{id}", h.GetUser).Methods("GET", "OPTIONS")
-	admin.HandleFunc("/users/{id}", h.UpdateUser).Methods("PUT", "OPTIONS")
-	admin.HandleFunc("/users/{id}", h.DeleteUser).Methods("DELETE", "OPTIONS")
+	admin.HandleFunc("/users", h.ListUsers).Methods("GET")
+	admin.HandleFunc("/users/{id}", h.GetUser).Methods("GET")
+	admin.HandleFunc("/users/{id}", h.UpdateUser).Methods("PUT")
+	admin.HandleFunc("/users/{id}", h.DeleteUser).Methods("DELETE")
 }
 
 // Register — POST /api/auth/register
@@ -55,7 +56,8 @@ func (h *Handler) RegisterRoutes(
 func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 	var input RegisterInput
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-		respondError(w, http.StatusBadRequest, "ошибка разбора запроса")
+		respondError(w, http.StatusBadRequest, "json decode error")
+		slog.Error("json decode error", "error", err, "input", input)
 		return
 	}
 
@@ -71,18 +73,23 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case errors.Is(err, ErrUserExists):
 			respondError(w, http.StatusConflict, err.Error())
+			slog.Error("user with that email already exist", "error", ErrUserExists, "email", input.Email)
 		case errors.Is(err, ErrInvalidUsername), errors.Is(err, ErrPasswordTooShort),
 			errors.Is(err, ErrInvalidEmail), errors.Is(err, ErrInvalidRole):
 			respondError(w, http.StatusBadRequest, err.Error())
+			slog.Error("invalid user data", "error", err, "username", input.Username, "passwd", input.Password,
+				"email", input.Email, "role", input.Role)
 		default:
-			respondError(w, http.StatusInternalServerError, "ошибка регистрации")
+			respondError(w, http.StatusInternalServerError, "registration error")
+			slog.Error("registration error", "error", err, "input data", input)
 		}
 		return
 	}
 
 	tokens, err := h.issueTokens(ctx, user)
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, "ошибка создания токенов")
+		respondError(w, http.StatusInternalServerError, "create token error")
+		slog.Error("create token error", "error", err)
 		return
 	}
 
@@ -93,12 +100,14 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	var input LoginInput
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-		respondError(w, http.StatusBadRequest, "ошибка разбора запроса")
+		respondError(w, http.StatusBadRequest, "json decode error")
+		slog.Error("json decode error", "error", err, "input", input)
 		return
 	}
 
 	if input.Username == "" || input.Password == "" {
-		respondError(w, http.StatusBadRequest, "логин и пароль обязательны")
+		respondError(w, http.StatusBadRequest, "login and password are required")
+		slog.Warn("login or passwd is empty")
 		return
 	}
 
@@ -107,18 +116,22 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrInvalidPassword):
-			respondError(w, http.StatusUnauthorized, "неверный логин или пароль")
+			respondError(w, http.StatusUnauthorized, "invalid login or password")
+			slog.Warn("invalid login or passwd", "error", err, "username", input.Username)
 		case errors.Is(err, ErrUserInactive):
-			respondError(w, http.StatusForbidden, "аккаунт деактивирован")
+			respondError(w, http.StatusForbidden, "deactivated account")
+			slog.Warn("deactivated account", "error", err, "username", input.Username)
 		default:
-			respondError(w, http.StatusInternalServerError, "ошибка аутентификации")
+			respondError(w, http.StatusInternalServerError, "authentication error")
+			slog.Warn("authentication error", "error", err, "username", input.Username)
 		}
 		return
 	}
 
 	tokens, err := h.issueTokens(ctx, user)
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, "ошибка создания токенов")
+		respondError(w, http.StatusInternalServerError, "creating tokens error")
+		slog.Error("creating tokens error", "error", err)
 		return
 	}
 
@@ -129,18 +142,21 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 	var input RefreshInput
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-		respondError(w, http.StatusBadRequest, "ошибка разбора запроса")
+		respondError(w, http.StatusBadRequest, "json decode error")
+		slog.Error("json decode error", "error", err, "input", input)
 		return
 	}
 	if input.RefreshToken == "" {
-		respondError(w, http.StatusBadRequest, "refresh_token обязателен")
+		respondError(w, http.StatusBadRequest, "refresh_token required")
+		slog.Warn("refresh_token required")
 		return
 	}
 
 	ctx := r.Context()
 	user, err := h.storage.ValidateRefreshToken(ctx, input.RefreshToken)
 	if err != nil {
-		respondError(w, http.StatusUnauthorized, "недействительный или истёкший refresh token")
+		respondError(w, http.StatusUnauthorized, "invalid or expired refresh token")
+		slog.Error("invalid or expired refresh token", "error", err)
 		return
 	}
 
@@ -149,7 +165,8 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 
 	tokens, err := h.issueTokens(ctx, user)
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, "ошибка создания токенов")
+		respondError(w, http.StatusInternalServerError, "creating tokens error")
+		slog.Error("creating tokens error", "error", err)
 		return
 	}
 
@@ -162,7 +179,7 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&input); err == nil && input.RefreshToken != "" {
 		_ = h.storage.RevokeRefreshToken(r.Context(), input.RefreshToken)
 	}
-	respondJSON(w, http.StatusOK, map[string]string{"message": "выход выполнен"})
+	respondJSON(w, http.StatusOK, map[string]string{"message": "successful logout"})
 }
 
 // Me — GET /api/auth/me (требует auth)
@@ -170,14 +187,15 @@ func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
 	// userID кладётся в контекст через AuthMiddleware
 	userIDVal := r.Context().Value(struct{ key string }{"userID"})
 	if userIDVal == nil {
-		respondError(w, http.StatusUnauthorized, "не авторизован")
+		respondError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 	userID, _ := userIDVal.(int64)
 
 	user, err := h.storage.GetByID(r.Context(), userID)
 	if err != nil {
-		respondError(w, http.StatusNotFound, "пользователь не найден")
+		respondError(w, http.StatusNotFound, "user not found")
+		slog.Error("user doesn't found", "error", err, "user", userID)
 		return
 	}
 	respondJSON(w, http.StatusOK, user.ToSafe())
@@ -187,7 +205,8 @@ func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) ListUsers(w http.ResponseWriter, r *http.Request) {
 	users, err := h.storage.List(r.Context())
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, "ошибка получения пользователей")
+		respondError(w, http.StatusInternalServerError, "getting user right error")
+		slog.Warn("getting user right error", "error", err)
 		return
 	}
 	safe := make([]*SafeUser, 0, len(users))
@@ -201,12 +220,14 @@ func (h *Handler) ListUsers(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) GetUser(w http.ResponseWriter, r *http.Request) {
 	id, err := parseID(mux.Vars(r)["id"])
 	if err != nil {
-		respondError(w, http.StatusBadRequest, "неверный ID")
+		respondError(w, http.StatusBadRequest, "invalid ID")
+		slog.Warn("invalid id", "error", err)
 		return
 	}
 	user, err := h.storage.GetByID(r.Context(), id)
 	if err != nil {
-		respondError(w, http.StatusNotFound, "пользователь не найден")
+		respondError(w, http.StatusNotFound, "user not found")
+		slog.Warn("user not found", "error", err, "user", id)
 		return
 	}
 	respondJSON(w, http.StatusOK, user.ToSafe())
@@ -216,13 +237,15 @@ func (h *Handler) GetUser(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 	id, err := parseID(mux.Vars(r)["id"])
 	if err != nil {
-		respondError(w, http.StatusBadRequest, "неверный ID")
+		respondError(w, http.StatusBadRequest, "invalid ID")
+		slog.Warn("invalid id", "error", err)
 		return
 	}
 
 	var input UpdateUserInput
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-		respondError(w, http.StatusBadRequest, "ошибка разбора запроса")
+		respondError(w, http.StatusBadRequest, "json decode error")
+		slog.Error("json decode error", "error", err, "input", input)
 		return
 	}
 
@@ -232,10 +255,13 @@ func (h *Handler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case errors.Is(err, ErrPasswordTooShort):
 			respondError(w, http.StatusBadRequest, err.Error())
+			slog.Error("passwd too short", "error", err, "user", id)
 		case errors.Is(err, ErrUserNotFound):
 			respondError(w, http.StatusNotFound, err.Error())
+			slog.Error("user not found", "error", err, "user", id)
 		default:
-			respondError(w, http.StatusInternalServerError, "ошибка обновления пользователя")
+			respondError(w, http.StatusInternalServerError, "user update error")
+			slog.Error("user update error", "error", err, "user", id)
 		}
 		return
 	}
@@ -252,34 +278,41 @@ func (h *Handler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 	id, err := parseID(mux.Vars(r)["id"])
 	if err != nil {
-		respondError(w, http.StatusBadRequest, "неверный ID")
+		respondError(w, http.StatusBadRequest, "invalid ID")
+		slog.Warn("invalid id", "error", err)
 		return
 	}
 
 	ctx := r.Context()
 	if err := h.storage.Delete(ctx, id); err != nil {
 		if errors.Is(err, ErrUserNotFound) {
-			respondError(w, http.StatusNotFound, "пользователь не найден")
+			respondError(w, http.StatusNotFound, "user not found")
+			slog.Error("user not found", "error", err, "user", id)
 		} else {
-			respondError(w, http.StatusInternalServerError, "ошибка удаления")
+			respondError(w, http.StatusInternalServerError, "deleting error")
+			slog.Error("deleting error", "error", err, "user", id)
 		}
 		return
 	}
 
 	_ = h.storage.RevokeAllUserTokens(ctx, id)
-	respondJSON(w, http.StatusOK, map[string]string{"message": "пользователь удалён"})
+	respondJSON(w, http.StatusOK, map[string]string{"message": "user deleted successfully"})
 }
 
 // issueTokens — создаёт пару access+refresh токенов и сохраняет refresh в БД
 func (h *Handler) issueTokens(ctx context.Context, user *User) (*TokenPair, error) {
 	accessToken, err := h.jwt.GenerateAccessToken(user)
 	if err != nil {
-		return nil, fmt.Errorf("ошибка генерации access token: %w", err)
+		return nil, fmt.Errorf("generate access token error: %w", err)
 	}
 
 	refreshToken, err := GenerateRefreshToken()
 	if err != nil {
-		return nil, fmt.Errorf("ошибка генерации refresh token: %w", err)
+		return nil, fmt.Errorf("generate refresh token error: %w", err)
+	}
+
+	if err := h.storage.StoreRefreshToken(ctx, user.ID, refreshToken); err != nil {
+		return nil, fmt.Errorf("store error refresh token: %w", err)
 	}
 
 	return &TokenPair{

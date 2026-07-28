@@ -114,13 +114,6 @@ type TokenPair struct {
 	User         *SafeUser `json:"user"`
 }
 
-// Claims — payload JWT-токена
-type Claims struct {
-	UserID   int64  `json:"user_id"`
-	Username string `json:"username"`
-	Role     Role   `json:"role"`
-}
-
 // Validate — базовая валидация входных данных при регистрации
 func (r *RegisterInput) Validate() error {
 	if len(r.Username) < 3 || len(r.Username) > 50 {

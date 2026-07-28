@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -30,13 +31,16 @@ func NewUserStorage(pool *pgxpool.Pool) *UserStorage {
 
 // Create — создаёт нового пользователя с хешированием пароля
 func (s *UserStorage) Create(ctx context.Context, input *RegisterInput) (*User, error) {
+	if s.pool == nil {
+		return nil, fmt.Errorf("database pool is nil")
+	}
 	if err := input.Validate(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("invalid user data %w", err)
 	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(input.Password), bcryptCost)
 	if err != nil {
-		return nil, fmt.Errorf("ошибка хеширования пароля: %w", err)
+		return nil, fmt.Errorf("hash password error: %w", err)
 	}
 
 	query := `
@@ -57,13 +61,16 @@ func (s *UserStorage) Create(ctx context.Context, input *RegisterInput) (*User, 
 		if isUniqueViolation(err) {
 			return nil, ErrUserExists
 		}
-		return nil, fmt.Errorf("ошибка создания пользователя: %w", err)
+		return nil, fmt.Errorf("creating user error: %w", err)
 	}
 	return user, nil
 }
 
 // GetByID — получить пользователя по ID
 func (s *UserStorage) GetByID(ctx context.Context, id int64) (*User, error) {
+	if s.pool == nil {
+		return nil, fmt.Errorf("database pool is nil")
+	}
 	query := `
 		SELECT id, username, email, password_hash, role, is_active, created_at, updated_at, last_login_at
 		FROM users WHERE id = $1
@@ -73,6 +80,9 @@ func (s *UserStorage) GetByID(ctx context.Context, id int64) (*User, error) {
 
 // GetByUsername — получить пользователя по логину
 func (s *UserStorage) GetByUsername(ctx context.Context, username string) (*User, error) {
+	if s.pool == nil {
+		return nil, fmt.Errorf("database pool is nil")
+	}
 	query := `
 		SELECT id, username, email, password_hash, role, is_active, created_at, updated_at, last_login_at
 		FROM users WHERE username = $1
@@ -82,13 +92,16 @@ func (s *UserStorage) GetByUsername(ctx context.Context, username string) (*User
 
 // List — список всех пользователей (только для admin)
 func (s *UserStorage) List(ctx context.Context) ([]*User, error) {
+	if s.pool == nil {
+		return nil, fmt.Errorf("database pool is nil")
+	}
 	query := `
 		SELECT id, username, email, password_hash, role, is_active, created_at, updated_at, last_login_at
 		FROM users ORDER BY created_at DESC
 	`
 	rows, err := s.pool.Query(ctx, query)
 	if err != nil {
-		return nil, fmt.Errorf("ошибка получения пользователей: %w", err)
+		return nil, fmt.Errorf("get user info error: %w", err)
 	}
 	defer rows.Close()
 
@@ -96,6 +109,7 @@ func (s *UserStorage) List(ctx context.Context) ([]*User, error) {
 	for rows.Next() {
 		user, err := s.scanUser(rows)
 		if err != nil {
+			slog.Warn("Failed to scan user row", "error", err)
 			continue
 		}
 		users = append(users, user)
@@ -105,6 +119,9 @@ func (s *UserStorage) List(ctx context.Context) ([]*User, error) {
 
 // Update — обновить данные пользователя
 func (s *UserStorage) Update(ctx context.Context, id int64, input *UpdateUserInput) (*User, error) {
+	if s.pool == nil {
+		return nil, fmt.Errorf("database pool is nil")
+	}
 	setParts := []string{"updated_at = NOW()"}
 	args := []interface{}{}
 	pos := 1
@@ -120,7 +137,7 @@ func (s *UserStorage) Update(ctx context.Context, id int64, input *UpdateUserInp
 		}
 		hash, err := bcrypt.GenerateFromPassword([]byte(input.Password), bcryptCost)
 		if err != nil {
-			return nil, fmt.Errorf("ошибка хеширования пароля: %w", err)
+			return nil, fmt.Errorf("hash password error: %w", err)
 		}
 		setParts = append(setParts, fmt.Sprintf("password_hash = $%d", pos))
 		args = append(args, string(hash))
@@ -148,6 +165,9 @@ func (s *UserStorage) Update(ctx context.Context, id int64, input *UpdateUserInp
 
 // Delete — удалить пользователя
 func (s *UserStorage) Delete(ctx context.Context, id int64) error {
+	if s.pool == nil {
+		return fmt.Errorf("database pool is nil")
+	}
 	result, err := s.pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, id)
 	if err != nil {
 		return fmt.Errorf("ошибка удаления пользователя: %w", err)
@@ -160,6 +180,9 @@ func (s *UserStorage) Delete(ctx context.Context, id int64) error {
 
 // Authenticate — проверяет логин/пароль, обновляет last_login_at
 func (s *UserStorage) Authenticate(ctx context.Context, username, password string) (*User, error) {
+	if s.pool == nil {
+		return nil, fmt.Errorf("database pool is nil")
+	}
 	user, err := s.GetByUsername(ctx, username)
 	if err != nil {
 		// timing-safe: считаем хеш даже если пользователь не найден
@@ -179,13 +202,18 @@ func (s *UserStorage) Authenticate(ctx context.Context, username, password strin
 	}
 
 	// обновляем время последнего входа
-	_, _ = s.pool.Exec(ctx, `UPDATE users SET last_login_at = NOW() WHERE id = $1`, user.ID)
+	if _, err = s.pool.Exec(ctx, `UPDATE users SET last_login_at = NOW() WHERE id = $1`, user.ID); err != nil {
+		slog.Warn("Failed to update last login time", "user_id", user.ID, "error", err)
+	}
 
 	return user, nil
 }
 
 // StoreRefreshToken — сохраняет refresh token (один на пользователя)
 func (s *UserStorage) StoreRefreshToken(ctx context.Context, userID int64, token string) error {
+	if s.pool == nil {
+		return fmt.Errorf("database pool is nil")
+	}
 	expiresAt := time.Now().Add(refreshTokenTTL)
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO refresh_tokens (user_id, token, expires_at, created_at)
@@ -195,11 +223,17 @@ func (s *UserStorage) StoreRefreshToken(ctx context.Context, userID int64, token
 			expires_at = EXCLUDED.expires_at,
 			created_at = NOW()
 	`, userID, token, expiresAt)
-	return err
+	if err != nil {
+		return fmt.Errorf("refresh token store error %w", err)
+	}
+	return nil
 }
 
 // ValidateRefreshToken — проверяет refresh token и возвращает пользователя
 func (s *UserStorage) ValidateRefreshToken(ctx context.Context, token string) (*User, error) {
+	if s.pool == nil {
+		return nil, fmt.Errorf("database pool is nil")
+	}
 	query := `
 		SELECT u.id, u.username, u.email, u.password_hash, u.role, u.is_active,
 		       u.created_at, u.updated_at, u.last_login_at
@@ -212,7 +246,7 @@ func (s *UserStorage) ValidateRefreshToken(ctx context.Context, token string) (*
 		if errors.Is(err, ErrUserNotFound) {
 			return nil, ErrInvalidToken
 		}
-		return nil, err
+		return nil, fmt.Errorf("scan user error %w", err)
 	}
 	if !user.IsActive {
 		return nil, ErrUserInactive
@@ -222,21 +256,31 @@ func (s *UserStorage) ValidateRefreshToken(ctx context.Context, token string) (*
 
 // RevokeRefreshToken — отзывает refresh token (выход)
 func (s *UserStorage) RevokeRefreshToken(ctx context.Context, token string) error {
-	_, err := s.pool.Exec(ctx, `DELETE FROM refresh_tokens WHERE token = $1`, token)
-	return err
+	if s.pool == nil {
+		return fmt.Errorf("database pool is nil")
+	}
+	if _, err := s.pool.Exec(ctx, `DELETE FROM refresh_tokens WHERE token = $1`, token); err != nil {
+		return fmt.Errorf("deleting ref token by token id error %w", err)
+	}
+	return nil
 }
 
 // RevokeAllUserTokens — отзывает все токены пользователя
 func (s *UserStorage) RevokeAllUserTokens(ctx context.Context, userID int64) error {
-	_, err := s.pool.Exec(ctx, `DELETE FROM refresh_tokens WHERE user_id = $1`, userID)
-	return err
+	if s.pool == nil {
+		return fmt.Errorf("database pool is nil")
+	}
+	if _, err := s.pool.Exec(ctx, `DELETE FROM refresh_tokens WHERE user_id = $1`, userID); err != nil {
+		return fmt.Errorf("deleting ref token by user id %w", err)
+	}
+	return nil
 }
 
 // GenerateRefreshToken — генерирует криптографически случайный токен
 func GenerateRefreshToken() (string, error) {
 	b := make([]byte, refreshTokenBytes)
 	if _, err := rand.Read(b); err != nil {
-		return "", fmt.Errorf("ошибка генерации токена: %w", err)
+		return "", fmt.Errorf("generate refresh token error: %w", err)
 	}
 	return hex.EncodeToString(b), nil
 }
@@ -260,7 +304,7 @@ func (s *UserStorage) scanUser(scanner interface {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrUserNotFound
 		}
-		return nil, fmt.Errorf("ошибка сканирования пользователя: %w", err)
+		return nil, fmt.Errorf("scan user error: %w", err)
 	}
 	return &user, nil
 }
