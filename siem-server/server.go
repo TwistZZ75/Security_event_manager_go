@@ -35,8 +35,11 @@ func main() {
 	}
 	defer pool.Close()
 
-	storages := InitStorages(pool)     //инициализация всех хранилищ
-	services := InitServices(storages) //инициализация всех сервисов
+	storages := InitStorages(pool)          //инициализация всех хранилищ
+	services, err := InitServices(storages) //инициализация всех сервисов
+	if err != nil {
+		slog.Error("initial services error", "error", err)
+	}
 	webServer := webserver.NewWebServer(
 		storages.AgentStorage, storages.AlertStorage, storages.ActionStorage, storages.RuleStorage, storages.LogStorage,
 		storages.UserStorage, services.JwtService, services.UserHandler,
