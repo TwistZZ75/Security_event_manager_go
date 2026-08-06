@@ -1,6 +1,8 @@
 package webserver
 
 import (
+	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"siem-server/actions"
@@ -23,6 +25,7 @@ type WebServer struct {
 	userStorage   *users.UserStorage
 	jwtService    *users.JWTService
 	userHandler   *users.Handler
+	server        *http.Server
 }
 
 func NewWebServer(
@@ -51,6 +54,20 @@ func NewWebServer(
 }
 
 func (ws *WebServer) Start(addr string) error {
+	ws.server = &http.Server{
+		Addr:    addr,
+		Handler: ws.router,
+	}
 	log.Printf("Web server starting on %s", addr)
-	return http.ListenAndServe(addr, ws.router)
+	if err := ws.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		return fmt.Errorf("web server error: %w", err)
+	}
+	return nil
+}
+
+func (ws *WebServer) Shutdown(ctx context.Context) error {
+	if err := ws.server.Shutdown(ctx); err != nil {
+		return fmt.Errorf("Shuting down error %w", err)
+	}
+	return nil
 }
