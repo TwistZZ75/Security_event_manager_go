@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log"
+	"log/slog"
 	"net"
 	"os"
 	"os/signal"
@@ -38,7 +39,7 @@ func main() {
 	services := InitServices(storages) //инициализация всех сервисов
 	webServer := webserver.NewWebServer(
 		storages.AgentStorage, storages.AlertStorage, storages.ActionStorage, storages.RuleStorage, storages.LogStorage,
-		storages.UserStorage, services.JwtService, services.UserHandler,
+		storages.UserStorage, services.JwtService, services.UserHandler, services.EventBus,
 	)
 	http_port := os.Getenv("HTTP_PORT")
 	//запуск всех фоновых процессов
@@ -86,6 +87,10 @@ func main() {
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer shutdownCancel()
+
+	if err := services.EventBus.Shutdown(shutdownCtx); err != nil {
+		slog.Error("Event bus shutdown error", "error", err)
+	}
 	webServer.Shutdown(shutdownCtx)
 
 	log.Println("Shutting down")

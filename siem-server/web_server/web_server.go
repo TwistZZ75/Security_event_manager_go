@@ -8,6 +8,7 @@ import (
 	"siem-server/actions"
 	"siem-server/agent"
 	"siem-server/alerts"
+	wsevents "siem-server/internal/events"
 	"siem-server/internal/storage/postgres"
 	"siem-server/rules"
 	"siem-server/users"
@@ -26,6 +27,7 @@ type WebServer struct {
 	jwtService    *users.JWTService
 	userHandler   *users.Handler
 	server        *http.Server
+	eventBus      *wsevents.Bus
 }
 
 func NewWebServer(
@@ -37,6 +39,7 @@ func NewWebServer(
 	userStorage *users.UserStorage,
 	jwtService *users.JWTService,
 	userHandler *users.Handler,
+	eventBus *wsevents.Bus,
 ) *WebServer {
 	ws := &WebServer{
 		router:        mux.NewRouter(),
@@ -48,6 +51,7 @@ func NewWebServer(
 		userStorage:   userStorage,
 		jwtService:    jwtService,
 		userHandler:   userHandler,
+		eventBus:      eventBus,
 	}
 	ws.setupRoutes()
 	return ws

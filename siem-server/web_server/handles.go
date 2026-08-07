@@ -1,16 +1,21 @@
 package webserver
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"log"
+	"log/slog"
 	"net/http"
+	wsevents "siem-server/internal/events"
 	logstructure "siem-server/internal/logsstructure"
 	"siem-server/rules"
 	"strconv"
+	"sync"
 	"time"
 
+	"github.com/coder/websocket"
 	"github.com/gorilla/mux"
 )
 
@@ -107,7 +112,7 @@ func (ws *WebServer) handleUpdateAlertStatus(w http.ResponseWriter, r *http.Requ
 	}
 
 	// НОВОЕ: берём имя пользователя из контекста (кладётся middleware)
-	updatedBy, _ := GetUsername(r.Context())
+	updatedBy, _ := getUsername(r.Context())
 	if updatedBy == "" {
 		updatedBy = "web"
 	}
@@ -283,6 +288,68 @@ func (ws *WebServer) handleSetRuleEnabled(w http.ResponseWriter, r *http.Request
 		"id":      ruleID,
 		"enabled": body.Enabled,
 	})
+}
+
+// ============================================================================
+// HANDLERS - WEBSOCKET
+// ============================================================================
+
+func (ws *WebServer) handlerWebSocket(w http.ResponseWriter, r *http.Request) {
+	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{}) // принимаем и апгрейдим наше соединение
+	if err != nil {
+		slog.Error("Cannot accept websocket connect", "error", err)
+		return
+	}
+	defer conn.CloseNow()
+
+	// не проходит аунтетификация через middleware потому что там мы берём токен из заголовка request, а здесь из
+	// массива байт пересылаемого в первом сообщении после открытого websocket соединения
+	authCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	_, msg, err := conn.Read(authCtx)
+	if err != nil {
+		slog.Error("Cannot read websocket open message", "error", err)
+		conn.Close(websocket.StatusPolicyViolation, "auth timeout")
+		return
+	}
+
+	var authMsg struct {
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal(msg, &authMsg); err != nil {
+		slog.Error("Unmarshal ws auth token msg", "error", err)
+		conn.Close(websocket.StatusPolicyViolation, "invalid auth message")
+		return
+	}
+
+	claims, err := ws.jwtService.ValidateAccessToken(authMsg.Token)
+	if err != nil {
+		slog.Error("Invalid token", "error", err)
+		conn.Close(websocket.StatusPolicyViolation, "invalid token")
+		return
+	}
+
+	slog.Info("websocket authenticated",
+		"user_id", claims.UserID,
+		"username", claims.Username,
+		"role", claims.Role,
+	)
+
+	var mu sync.Mutex
+	var currentSubs *wsevents.Subscruber
+
+	setSubscriber := func(filter func(wsevents.Event) bool) {
+		mu.Lock()
+		defer mu.Unlock()
+
+		if currentSubs != nil {
+			ws.eventBus.Unsubscribe(currentSubs.ID)
+		}
+		currentSubs = ws.eventBus.Subscribe(filter)
+	}
+
+	setSubscriber(func(e wsevents.Event) bool { return true })
 }
 
 // ============================================================================

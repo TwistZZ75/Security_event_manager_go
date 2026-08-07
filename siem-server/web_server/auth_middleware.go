@@ -95,20 +95,20 @@ func RequirePermission(permission string) func(http.Handler) http.Handler {
 	}
 }
 
-// GetUserID — хелпер для извлечения ID пользователя из контекста
-func GetUserID(ctx context.Context) (int64, bool) {
+// getUserID — хелпер для извлечения ID пользователя из контекста
+func getUserID(ctx context.Context) (int64, bool) {
 	id, ok := ctx.Value(ContextUserID).(int64)
 	return id, ok
 }
 
-// GetUsername — хелпер для извлечения имени пользователя из контекста
-func GetUsername(ctx context.Context) (string, bool) {
+// getUsername — хелпер для извлечения имени пользователя из контекста
+func getUsername(ctx context.Context) (string, bool) {
 	name, ok := ctx.Value(ContextUsername).(string)
 	return name, ok
 }
 
-// GetUserRole — хелпер для извлечения роли из контекста
-func GetUserRole(ctx context.Context) (users.Role, bool) {
+// getUserRole — хелпер для извлечения роли из контекста
+func getUserRole(ctx context.Context) (users.Role, bool) {
 	role, ok := ctx.Value(ContextUserRole).(users.Role)
 	return role, ok
 }

@@ -9,6 +9,7 @@ import (
 	"siem-server/agent"
 	"siem-server/alerts"
 	"siem-server/internal/delivery"
+	wsevents "siem-server/internal/events"
 	"siem-server/internal/parsers"
 	processor "siem-server/internal/processor"
 	postgres "siem-server/internal/storage/postgres"
@@ -80,12 +81,14 @@ type Services struct {
 	LogProc       *processor.LogProc
 	LogHandler    *delivery.LogHandler
 	AgentHandler  *agent.AgentServiceHandler
+	EventBus      *wsevents.Bus
 }
 
 // функция инициализации сервисов и хендлеров
 // принимает объект хранилища
 // возвращает объект сервиса
 func InitServices(storages *Storages) *Services {
+	eventBus := wsevents.NewBus()
 	jwtService := users.NewJWTService()
 	userHandler := users.NewHandler(storages.UserStorage, jwtService)
 	notifier := actions.NewMultiNotifier()
@@ -115,5 +118,6 @@ func InitServices(storages *Storages) *Services {
 		LogProc:       logProc,
 		LogHandler:    logHandler,
 		AgentHandler:  agentHandler,
+		EventBus:      eventBus,
 	}
 }
