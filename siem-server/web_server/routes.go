@@ -11,6 +11,9 @@ func (ws *WebServer) setupRoutes() {
 
 	api := ws.router.PathPrefix("/api").Subrouter()
 
+	// WebSocket
+	api.HandleFunc("/ws", ws.handlerWebSocket).Methods("GET")
+
 	// ── Middleware factories ────────────────────────────────────────────────
 	authRequired := AuthMiddleware(ws.jwtService)
 	adminOnly := RequireRole(users.RoleAdmin)

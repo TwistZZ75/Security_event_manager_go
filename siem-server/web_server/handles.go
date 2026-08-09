@@ -5,19 +5,35 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"log"
 	"log/slog"
 	"net/http"
 	wsevents "siem-server/internal/events"
 	logstructure "siem-server/internal/logsstructure"
 	"siem-server/rules"
+	"siem-server/users"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/coder/websocket"
 	"github.com/gorilla/mux"
 )
+
+// ============================================================================
+// HANDLERS - WEBSOCKET
+// ============================================================================
+
+type authMsg struct {
+	Token string `json:"token"`
+}
+
+type subscribeMsg struct {
+	Types  []string `json:"type"`
+	Action string   `json:"action"`
+}
+
+const maxMessageSize = 4096
 
 // ============================================================================
 // HANDLERS - AUTH
@@ -295,38 +311,32 @@ func (ws *WebServer) handleSetRuleEnabled(w http.ResponseWriter, r *http.Request
 // ============================================================================
 
 func (ws *WebServer) handlerWebSocket(w http.ResponseWriter, r *http.Request) {
-	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{}) // принимаем и апгрейдим наше соединение
+	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
+		OriginPatterns: []string{
+			"localhost:3000",
+			"127.0.0.1:3000",
+		},
+	}) // принимаем и апгрейдим наше соединение
 	if err != nil {
 		slog.Error("Cannot accept websocket connect", "error", err)
 		return
 	}
-	defer conn.CloseNow()
+	defer conn.Close(websocket.StatusNormalClosure, "connection closed")
+
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+
+	conn.SetReadLimit(maxMessageSize) // ограничение размера входящих сообщений для предотвращения атак большими сообщениями
 
 	// не проходит аунтетификация через middleware потому что там мы берём токен из заголовка request, а здесь из
 	// массива байт пересылаемого в первом сообщении после открытого websocket соединения
-	authCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+	authCtx, authCancel := context.WithTimeout(ctx, 5*time.Second)
 
-	_, msg, err := conn.Read(authCtx)
+	claims, err := authCheck(authCtx, conn, ws.jwtService)
+	authCancel()
 	if err != nil {
-		slog.Error("Cannot read websocket open message", "error", err)
-		conn.Close(websocket.StatusPolicyViolation, "auth timeout")
-		return
-	}
-
-	var authMsg struct {
-		Token string `json:"token"`
-	}
-	if err := json.Unmarshal(msg, &authMsg); err != nil {
-		slog.Error("Unmarshal ws auth token msg", "error", err)
-		conn.Close(websocket.StatusPolicyViolation, "invalid auth message")
-		return
-	}
-
-	claims, err := ws.jwtService.ValidateAccessToken(authMsg.Token)
-	if err != nil {
-		slog.Error("Invalid token", "error", err)
-		conn.Close(websocket.StatusPolicyViolation, "invalid token")
+		slog.Warn("websocket authentication failed", "error", err)
+		conn.Close(websocket.StatusPolicyViolation, "authentication failed")
 		return
 	}
 
@@ -336,20 +346,101 @@ func (ws *WebServer) handlerWebSocket(w http.ResponseWriter, r *http.Request) {
 		"role", claims.Role,
 	)
 
-	var mu sync.Mutex
-	var currentSubs *wsevents.Subscruber
-
-	setSubscriber := func(filter func(wsevents.Event) bool) {
-		mu.Lock()
-		defer mu.Unlock()
-
-		if currentSubs != nil {
-			ws.eventBus.Unsubscribe(currentSubs.ID)
+	sub := ws.eventBus.Subscribe(func(e wsevents.Event) bool {
+		switch e.Type {
+		case wsevents.EventCreated,
+			wsevents.AlertCreated,
+			wsevents.AlertUpdated:
+			return true
+		default:
+			return false
 		}
-		currentSubs = ws.eventBus.Subscribe(filter)
+	})
+
+	if sub == nil {
+		_ = conn.Close(websocket.StatusInternalError, "event bus is shuting down")
+		return
 	}
 
-	setSubscriber(func(e wsevents.Event) bool { return true })
+	defer ws.eventBus.Unsubscribe(sub.ID)
+
+	// writter
+	writeDone := make(chan struct{})
+
+	go func() {
+		defer close(writeDone)
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+
+			case event, ok := <-sub.Channel:
+				if !ok {
+					return
+				}
+
+				if conn.Write(ctx, websocket.MessageText, mustJSON(event)); err != nil {
+					slog.Debug("websocket write failed", "error", err)
+					cancel()
+					return
+				}
+
+			}
+		}
+	}()
+
+	//reader
+	for {
+		//TODO: должны принимать сообщения от фронта
+		// сообщения типа subscribe, unsubscribe, filters
+		_, _, err := conn.Read(ctx)
+		if err != nil {
+			break
+		}
+	}
+
+	<-writeDone
+	slog.Debug("websocket connection closed", "user_id", claims.UserID)
+}
+
+func authCheck(authCtx context.Context, conn *websocket.Conn, jwtService *users.JWTService) (*users.JWTClaims, error) {
+	_, msg, err := conn.Read(authCtx)
+	if err != nil {
+		slog.Error("Cannot read websocket open message", "error", err)
+		conn.Close(websocket.StatusPolicyViolation, "auth timeout")
+		return nil, fmt.Errorf("auth timeout, %w", err)
+	}
+
+	var authMsg authMsg
+
+	if err := json.Unmarshal(msg, &authMsg); err != nil {
+		slog.Error("Unmarshal ws auth token msg", "error", err)
+		conn.Close(websocket.StatusPolicyViolation, "invalid auth message")
+		return nil, fmt.Errorf("invalid auth message, %w", err)
+	}
+
+	if authMsg.Token == "" {
+		return nil, fmt.Errorf("empty token")
+	}
+
+	claims, err := jwtService.ValidateAccessToken(authMsg.Token)
+	if err != nil {
+		slog.Error("Invalid token", "error", err)
+		conn.Close(websocket.StatusPolicyViolation, "invalid token")
+		return nil, fmt.Errorf("invalid token, %w", err)
+	}
+
+	return claims, nil
+}
+
+func mustJSON(event wsevents.Event) []byte {
+	data, err := json.Marshal(event)
+	if err != nil {
+		slog.Error("cannot marshal websocket event", "error", err)
+		return []byte(`{"type":"error"}`)
+	}
+	return data
 }
 
 // ============================================================================

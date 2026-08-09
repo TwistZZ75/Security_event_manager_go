@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log"
+	wsevents "siem-server/internal/events"
+	"strconv"
 	"time"
 )
 
@@ -11,6 +13,7 @@ import (
 type AlertManager struct {
 	storage  *AlertStorage
 	notifier Notifier
+	eventBus *wsevents.Bus
 }
 
 // Notifier интерфейс для отправки уведомлений
@@ -19,10 +22,11 @@ type Notifier interface {
 }
 
 // NewAlertManager создает новый менеджер алертов
-func NewAlertManager(storage *AlertStorage, notifier Notifier) *AlertManager {
+func NewAlertManager(storage *AlertStorage, notifier Notifier, eventBus *wsevents.Bus) *AlertManager {
 	return &AlertManager{
 		storage:  storage,
 		notifier: notifier,
+		eventBus: eventBus,
 	}
 }
 
@@ -42,6 +46,13 @@ func (am *AlertManager) CreateAlert(ctx context.Context, alert *Alert) error {
 	if err := am.storage.CreateAlert(ctx, alert); err != nil {
 		return fmt.Errorf("failed to create alert: %v", err)
 	}
+
+	// публикуем событие для websocket
+	am.eventBus.Publish(wsevents.Event{
+		Type:      wsevents.AlertCreated,
+		Payload:   alert,
+		Timestamp: time.Now(),
+	})
 
 	log.Printf("Alert created: ID=%d, Rule=%s, Severity=%s", alert.ID, alert.RuleName, alert.Severity)
 
@@ -66,7 +77,30 @@ func (am *AlertManager) GetAlert(ctx context.Context, id string) (*Alert, error)
 
 // UpdateAlertStatus обновляет статус алерта
 func (am *AlertManager) UpdateAlertStatus(ctx context.Context, id int64, status, updatedBy, notes string) error {
-	return am.storage.UpdateAlert(ctx, id, status, updatedBy, notes)
+
+	if err := am.storage.UpdateAlert(
+		ctx,
+		id,
+		status,
+		updatedBy,
+		notes,
+	); err != nil {
+		return fmt.Errorf("update alert status: %w", err)
+	}
+
+	// Получаем актуальную версию Alert из БД
+	alert, err := am.storage.GetAlert(ctx, strconv.FormatInt(id, 10))
+	if err != nil {
+		return fmt.Errorf("get updated alert: %w", err)
+	}
+
+	am.eventBus.Publish(wsevents.Event{
+		Type:      wsevents.AlertUpdated,
+		Payload:   alert,
+		Timestamp: time.Now(),
+	})
+
+	return nil
 }
 
 // GetAlerts получает список алертов с фильтром

@@ -93,7 +93,7 @@ func InitServices(storages *Storages) *Services {
 	userHandler := users.NewHandler(storages.UserStorage, jwtService)
 	notifier := actions.NewMultiNotifier()
 	agentCommunicator := actions.NewGRPCAgentComm(storages.CommandQueueStorage)
-	alertMgr := alerts.NewAlertManager(storages.AlertStorage, notifier)
+	alertMgr := alerts.NewAlertManager(storages.AlertStorage, notifier, eventBus)
 	actionDsp := actions.NewDispatcher(storages.ActionStorage, agentCommunicator, notifier)
 	ruleEngine := rules.NewEngine(
 		storages.RuleStorage,
