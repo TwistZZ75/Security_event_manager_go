@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { PieChart, Pie, Cell, AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import { Bell, AlertTriangle, CheckCircle, Clock, XCircle, RotateCcw } from 'lucide-react';
 import { getAlerts, updateAlertStatus } from '../api/api';
@@ -24,7 +24,7 @@ const SEV_LABELS: Record<string, string> = {
 const isResolved = (s: string) => s === 'resolved' || s === 'false_positive';
 
 export default function AlertsPage() {
-  const { username } = useAuth();
+  const { username, token } = useAuth();
   const [alerts, setAlerts]       = useState<Alert[]>([]);
   const [loading, setLoading]     = useState(true);
   const [error, setError]         = useState('');
@@ -34,6 +34,8 @@ export default function AlertsPage() {
   const [sending, setSending]     = useState(false);
   const [sendError, setSendError] = useState('');
 
+  const wsRef = useRef<WebSocket | null>(null);
+
   useEffect(() => {
     setLoading(true);
     getAlerts()
@@ -41,6 +43,100 @@ export default function AlertsPage() {
       .catch(e => setError(e.message))
       .finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    if (!token) {
+      return;
+    }
+
+    let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+    let stopped = false;
+
+    const connect = () => {
+      if (stopped) {
+        return;
+      }
+const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+
+const ws = new WebSocket(
+  `${wsProtocol}//${window.location.host}/api/ws`
+);
+
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        ws.send(JSON.stringify({
+          token,
+        }));
+      };
+
+       ws.onmessage = (message) => {
+        try {
+          const event = JSON.parse(message.data);
+
+          switch (event.type) {
+
+            // Новый Alert
+            case 'alert.created':
+              setAlerts(prev => {
+                // Защита от повторного добавления.
+                if (prev.some(a => a.id === event.payload.id)) {
+                  return prev;
+                }
+
+                return [...prev, event.payload];
+              });
+              break;
+
+            // Изменённый Alert
+            case 'alert.updated':
+              setAlerts(prev =>
+                prev.map(a =>
+                  a.id === event.payload.id
+                    ? event.payload
+                    : a
+                )
+              );
+              break;
+          }
+        } catch (err) {
+          console.error(
+            'Invalid WebSocket message:',
+            err
+          );
+        }
+      };
+
+      ws.onclose = () => {
+        if (stopped) {
+          return;
+        }
+
+        getAlerts()
+          .then(data => setAlerts(data ?? []))
+          .catch(() => {});
+
+        reconnectTimer = setTimeout(connect, 3000);
+      };
+
+      ws.onerror = () => {
+        ws.close();
+      };
+    };
+
+    connect();
+
+     return () => {
+      stopped = true;
+
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+      }
+
+      wsRef.current?.close();
+      wsRef.current = null;
+    };
+  }, [token]);
 
   const openModal  = (a: Alert) => { setSelected(a); setStatus(''); setNotes(''); setSendError(''); };
   const closeModal = () => setSelected(null);
@@ -50,8 +146,12 @@ export default function AlertsPage() {
     setSending(true);
     setSendError('');
     try {
-      await updateAlertStatus(selected.id, statusChoice, notes);
-      setAlerts(prev => prev.map(a => a.id === selected.id ? { ...a, status: statusChoice as Alert['status'] } : a));
+      await updateAlertStatus(
+        selected.id,
+        statusChoice,
+        notes
+      );
+
       closeModal();
     } catch (e) {
       setSendError(e instanceof Error ? e.message : 'Ошибка обновления');
