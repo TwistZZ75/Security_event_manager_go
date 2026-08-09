@@ -51,31 +51,67 @@ type Provider struct {
 	Guid string `xml:"Guid,attr"`
 }
 
-type ParseXmlStruct struct{}
+type XMLParser struct{}
 
-func NewXmlParse() *ParseXmlStruct {
-	return &ParseXmlStruct{}
+func NewXmlParse() *XMLParser {
+	return &XMLParser{}
 }
 
-func (xml_p *ParseXmlStruct) Parser(raw_log *logstructure.RawLog) (*logstructure.NormalizedLog, error) {
-	NormalizedLog := &logstructure.NormalizedLog{
-		ID:                xml_p.GenerateID(raw_log),
+func (xml_p *XMLParser) Parse(raw_log *logstructure.RawLog) (*logstructure.NormalizedLog, error) {
+	clean := sanitizeXML(raw_log.Raw_data)
+	var event Event
+	if err := xml.Unmarshal([]byte(clean), &event); err != nil {
+		// Если не смогли распарсить, то возвращаем минимально заполненный лог с ошибкой
+		return &logstructure.NormalizedLog{
+			ID:                xml_p.generateID(raw_log),
+			PC_name:           raw_log.PC_name,
+			Username:          raw_log.Username,
+			Event_description: "Failed to parse XML event",
+			Event_category:    "Parse Error",
+			Severity:          "Undefined",
+			Timestamp:         raw_log.Event_timestamp,
+			OS:                raw_log.OS,
+			Source:            raw_log.Log_source,
+			Raw_log:           raw_log.Raw_data,
+		}, nil
+	}
+	// Извлекаем карту Data для быстрого доступа
+	dataMap := make(map[string]string)
+	for _, d := range event.EventData.Data {
+		dataMap[d.Name] = d.Value
+	}
+
+	category := getEventCategory(event)
+	description := getEventDescription(event, dataMap)
+	severity := getSeverity(event)
+	processName := getProcessName(event, dataMap)
+
+	return &logstructure.NormalizedLog{
+		ID:                xml_p.generateID(raw_log),
 		PC_name:           raw_log.PC_name,
 		Username:          raw_log.Username,
-		Event_description: xml_p.Define_EventDescription(raw_log.Raw_data),
-		Event_category:    xml_p.Define_EventCategory(raw_log.Raw_data),
-		Process_name:      xml_p.Define_ProcessName(raw_log.Raw_data),
-		Severity:          xml_p.Define_Severity(raw_log.Raw_data),
+		Event_description: description,
+		Event_category:    category,
+		Process_name:      processName,
+		Severity:          severity,
 		Timestamp:         raw_log.Event_timestamp,
 		OS:                raw_log.OS,
 		Source:            raw_log.Log_source,
 		Raw_log:           raw_log.Raw_data,
+		RawLogCached:      convertToMap(dataMap),
+	}, nil
+}
+
+func convertToMap(data map[string]string) map[string]interface{} {
+	result := make(map[string]interface{}, len(data))
+	for k, v := range data {
+		result[k] = v
 	}
-	return NormalizedLog, nil
+	return result
 }
 
 // sanitizeXML удаляет недопустимые в XML управляющие символы
-func (xml_p *ParseXmlStruct) sanitizeXML(s string) string {
+func sanitizeXML(s string) string {
 	var b strings.Builder
 	for _, r := range s {
 		if r == 0x9 || r == 0xA || r == 0xD {
@@ -91,18 +127,13 @@ func (xml_p *ParseXmlStruct) sanitizeXML(s string) string {
 	return b.String()
 }
 
-func (xml_p *ParseXmlStruct) GenerateID(raw_log *logstructure.RawLog) string {
+func (xml_p *XMLParser) generateID(raw_log *logstructure.RawLog) string {
 	data := raw_log.Log_source + raw_log.PC_name + raw_log.Username + raw_log.Raw_data
 	hashID := sha256.Sum256([]byte(data))
 	return hex.EncodeToString(hashID[:])
 }
 
-func (xml_p *ParseXmlStruct) Define_Severity(raw_log string) string {
-	clean_raw_log := xml_p.sanitizeXML(raw_log)
-	var event Event
-	if err := xml.Unmarshal([]byte(clean_raw_log), &event); err != nil {
-		return "Undefined"
-	}
+func getSeverity(event Event) string {
 	switch event.System.Level {
 	case 0:
 		return "Info"
@@ -121,23 +152,29 @@ func (xml_p *ParseXmlStruct) Define_Severity(raw_log string) string {
 	}
 }
 
-func (xml_p *ParseXmlStruct) Define_EventCategory(raw_log string) string {
-	clean := xml_p.sanitizeXML(raw_log)
-	var event Event
-	if err := xml.Unmarshal([]byte(clean), &event); err != nil {
-		return "Parse Error"
+func getProcessName(event Event, data map[string]string) string {
+	// Приоритет: Application, NewProcessName, ProcessName, затем Provider Name
+	for _, key := range []string{"Application", "NewProcessName", "ProcessName"} {
+		if val := data[key]; val != "" {
+			parts := strings.Split(val, "\\")
+			return parts[len(parts)-1]
+		}
 	}
+	return event.System.Provider.Name
+}
+
+func getEventCategory(event Event) string {
 	switch event.System.Channel {
 	case "Security":
-		return xml_p.categorizeSecurityEvent(event.System.EventID)
+		return categorizeSecurityEvent(event.System.EventID)
 	case "System":
-		return xml_p.categorizeSystemEvent(event.System.EventID)
+		return categorizeSystemEvent(event.System.EventID)
 	case "Application":
-		return xml_p.categorizeApplicationEvent(event)
+		return categorizeApplicationEvent(event)
 	case "Microsoft-Windows-PowerShell/Operational":
 		return "PowerShell"
 	case "Microsoft-Windows-Sysmon/Operational":
-		return xml_p.categorizeSysmonEvent(event.System.EventID)
+		return categorizeSysmonEvent(event.System.EventID)
 	case "Microsoft-Windows-TaskScheduler/Operational":
 		return "Scheduled Task"
 	case "Microsoft-Windows-Windows Firewall With Advanced Security/Firewall":
@@ -150,7 +187,7 @@ func (xml_p *ParseXmlStruct) Define_EventCategory(raw_log string) string {
 // =============================================================================
 // categorizeSecurityEvent
 // =============================================================================
-func (xml_p *ParseXmlStruct) categorizeSecurityEvent(eventID int) string {
+func categorizeSecurityEvent(eventID int) string {
 	switch {
 
 	// ── Вход / выход ──────────────────────────────────────────────────────────
@@ -268,7 +305,7 @@ func (xml_p *ParseXmlStruct) categorizeSecurityEvent(eventID int) string {
 
 // categorizeSystemEvent — System Log (канал "System")
 // Unified: "Service Installed"/"Service Started"/"Service Stopped" совпадают с systemd на Linux
-func (xml_p *ParseXmlStruct) categorizeSystemEvent(eventID int) string {
+func categorizeSystemEvent(eventID int) string {
 	switch {
 	case eventID == 7045:
 		return "Service Installed"
@@ -297,7 +334,7 @@ func (xml_p *ParseXmlStruct) categorizeSystemEvent(eventID int) string {
 
 // categorizeSysmonEvent — Sysmon Operational Log
 // Unified: "Process Creation" / "Process Terminated" / "Network Connection" / "Registry Event"
-func (xml_p *ParseXmlStruct) categorizeSysmonEvent(eventID int) string {
+func categorizeSysmonEvent(eventID int) string {
 	switch eventID {
 	case 1:
 		return "Process Creation" // unified с Security 4688
@@ -332,7 +369,7 @@ func (xml_p *ParseXmlStruct) categorizeSysmonEvent(eventID int) string {
 	}
 }
 
-func (xml_p *ParseXmlStruct) categorizeApplicationEvent(event Event) string {
+func categorizeApplicationEvent(event Event) string {
 	provider := strings.ToLower(event.System.Provider.Name)
 	switch {
 	case strings.Contains(provider, "msiinstaller"):
@@ -349,17 +386,8 @@ func (xml_p *ParseXmlStruct) categorizeApplicationEvent(event Event) string {
 // =============================================================================
 // Define_EventDescription
 // =============================================================================
-func (xml_p *ParseXmlStruct) Define_EventDescription(raw_log string) string {
-	clean := xml_p.sanitizeXML(raw_log)
-	var event Event
-	if err := xml.Unmarshal([]byte(clean), &event); err != nil {
-		return "Failed to parse event"
-	}
+func getEventDescription(event Event, data map[string]string) string {
 
-	data := make(map[string]string)
-	for _, d := range event.EventData.Data {
-		data[d.Name] = d.Value
-	}
 	get := func(keys ...string) string {
 		for _, k := range keys {
 			if v := data[k]; v != "" {
@@ -595,8 +623,8 @@ func (xml_p *ParseXmlStruct) Define_EventDescription(raw_log string) string {
 	}
 }
 
-func (xml_p *ParseXmlStruct) Define_ProcessName(raw_log string) string {
-	clean_raw_log := xml_p.sanitizeXML(raw_log)
+func (xml_p *XMLParser) Define_ProcessName(raw_log string) string {
+	clean_raw_log := sanitizeXML(raw_log)
 	var event Event
 	if err := xml.Unmarshal([]byte(clean_raw_log), &event); err != nil {
 		return ""

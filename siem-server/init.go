@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"log/slog"
 	"os"
 	"siem-server/actions"
 	"siem-server/agent"
@@ -91,7 +92,7 @@ func InitServices(storages *Storages) *Services {
 	eventBus := wsevents.NewBus()
 	jwtService := users.NewJWTService()
 	userHandler := users.NewHandler(storages.UserStorage, jwtService)
-	notifier := actions.NewMultiNotifier()
+	multiNotifier := actions.NewMultiNotifier(&emailCfg, &telegramCfg)
 	agentCommunicator := actions.NewGRPCAgentComm(storages.CommandQueueStorage)
 	alertMgr := alerts.NewAlertManager(storages.AlertStorage, notifier, eventBus)
 	actionDsp := actions.NewDispatcher(storages.ActionStorage, agentCommunicator, notifier)
@@ -109,7 +110,7 @@ func InitServices(storages *Storages) *Services {
 	return &Services{
 		JwtService:    jwtService,
 		UserHandler:   userHandler,
-		Notifier:      notifier,
+		Notifier:      multiNotifier,
 		AgentCommands: agentCommunicator,
 		AlertMgr:      alertMgr,
 		ActionDisp:    actionDsp,

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -27,10 +28,15 @@ func (as *ActionStorage) LogAction(ctx context.Context, actionLog *ActionLog) er
 }
 
 func (as *ActionStorage) StoreAction(ctx context.Context, actionLog *ActionLog) error {
+	//проверяем наличие соединений с БД
+	if as.pool == nil {
+		slog.Error("database pool is nil")
+		return fmt.Errorf("database pool is nil")
+	}
 	// Сериализуем parameters в JSONB
 	parametersJSON, err := json.Marshal(actionLog.Parameters)
 	if err != nil {
-		return fmt.Errorf("failed to marshal parameters: %v", err)
+		return fmt.Errorf("failed to marshal parameters: %w", err)
 	}
 
 	// Устанавливаем время выполнения если не установлено
@@ -64,13 +70,19 @@ func (as *ActionStorage) StoreAction(ctx context.Context, actionLog *ActionLog) 
 	).Scan(&actionLog.ID)
 
 	if err != nil {
-		return fmt.Errorf("failed to insert action log: %v", err)
+		return fmt.Errorf("failed to insert action log: %w", err)
 	}
 
 	return nil
 }
 
 func (as *ActionStorage) UpdateAction(ctx context.Context, actionLog *ActionLog) error {
+	//проверяем наличие соединений с БД
+	if as.pool == nil {
+		slog.Error("database pool is nil")
+		return fmt.Errorf("database pool is nil")
+	}
+
 	query := `
 		UPDATE actions_log
 		SET status = $1,
@@ -89,7 +101,7 @@ func (as *ActionStorage) UpdateAction(ctx context.Context, actionLog *ActionLog)
 	)
 
 	if err != nil {
-		return fmt.Errorf("failed to update action log: %v", err)
+		return fmt.Errorf("failed to update action log: %w", err)
 	}
 
 	return nil
@@ -124,14 +136,14 @@ func (as *ActionStorage) ScanActionLog(scanner interface {
 	)
 
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("action storage scan error: %w", err)
 	}
 
 	// Десериализуем parameters
 	var parameters map[string]interface{}
 	if len(parametersJSON) > 0 {
 		if err := json.Unmarshal(parametersJSON, &parameters); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal parameters: %v", err)
+			return nil, fmt.Errorf("failed to unmarshal parameters: %w", err)
 		}
 	}
 
@@ -152,6 +164,11 @@ func (as *ActionStorage) ScanActionLog(scanner interface {
 
 // GetActionLog получает лог действия по ID
 func (as *ActionStorage) GetActionLog(ctx context.Context, id string) (*ActionLog, error) {
+	//проверяем наличие соединений с БД
+	if as.pool == nil {
+		slog.Error("database pool is nil")
+		return nil, fmt.Errorf("database pool is nil")
+	}
 	query := `
 		SELECT 
 			id,
@@ -170,13 +187,18 @@ func (as *ActionStorage) GetActionLog(ctx context.Context, id string) (*ActionLo
 	row := as.pool.QueryRow(ctx, query, id)
 	actionLog, err := as.ScanActionLog(row)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get action log: %v", err)
+		return nil, fmt.Errorf("failed to get action log: %w", err)
 	}
 
 	return actionLog, nil
 }
 
 func (as *ActionStorage) GetActionsByAlert(ctx context.Context, alertID int64) ([]*ActionLog, error) {
+	//проверяем наличие соединений с БД
+	if as.pool == nil {
+		slog.Error("database pool is nil")
+		return nil, fmt.Errorf("database pool is nil")
+	}
 	query := `
 		SELECT 
 			id, alert_id, action_type, target, parameters,
@@ -188,7 +210,7 @@ func (as *ActionStorage) GetActionsByAlert(ctx context.Context, alertID int64) (
 
 	rows, err := as.pool.Query(ctx, query, alertID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query actions: %v", err)
+		return nil, fmt.Errorf("failed to query actions: %w", err)
 	}
 	defer rows.Close()
 
@@ -197,16 +219,24 @@ func (as *ActionStorage) GetActionsByAlert(ctx context.Context, alertID int64) (
 	for rows.Next() {
 		action, err := as.ScanActionLog(rows)
 		if err != nil {
-			fmt.Printf("Warning: failed to scan action log: %v\n", err)
+			slog.Warn("failed to scan action log", "error", err)
 			continue
 		}
 		actions = append(actions, action)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating actions: %w", err)
 	}
 
 	return actions, nil
 }
 
 func (as *ActionStorage) ListActions(ctx context.Context, filter ActionFilter) ([]*ActionLog, error) {
+	//проверяем наличие соединений с БД
+	if as.pool == nil {
+		slog.Error("database pool is nil")
+		return nil, fmt.Errorf("database pool is nil")
+	}
 	query := `
 		SELECT 
 			id, alert_id, action_type, target, parameters,
@@ -269,16 +299,24 @@ func (as *ActionStorage) ListActions(ctx context.Context, filter ActionFilter) (
 	for rows.Next() {
 		action, err := as.ScanActionLog(rows)
 		if err != nil {
-			fmt.Printf("Warning: failed to scan action log: %v\n", err)
+			slog.Warn("failed to scan action log", "error", err)
 			continue
 		}
 		actions = append(actions, action)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating actions: %w", err)
 	}
 
 	return actions, nil
 }
 
 func (as *ActionStorage) GetActionStats(ctx context.Context, from, to time.Time) (*ActionStats, error) {
+	//проверяем наличие соединений с БД
+	if as.pool == nil {
+		slog.Error("database pool is nil")
+		return nil, fmt.Errorf("database pool is nil")
+	}
 	query := `
 		SELECT
 			COUNT(*)::BIGINT as total,
@@ -306,13 +344,18 @@ func (as *ActionStorage) GetActionStats(ctx context.Context, from, to time.Time)
 	)
 
 	if err != nil {
-		return nil, fmt.Errorf("failed to get action stats: %v", err)
+		return nil, fmt.Errorf("failed to get action stats: %w", err)
 	}
 
 	return &stats, nil
 }
 
 func (as *ActionStorage) GetFailedActions(ctx context.Context, limit int) ([]*ActionLog, error) {
+	//проверяем наличие соединений с БД
+	if as.pool == nil {
+		slog.Error("database pool is nil")
+		return nil, fmt.Errorf("database pool is nil")
+	}
 	query := `
 		SELECT 
 			id, alert_id, action_type, target, parameters,
@@ -325,7 +368,7 @@ func (as *ActionStorage) GetFailedActions(ctx context.Context, limit int) ([]*Ac
 
 	rows, err := as.pool.Query(ctx, query, limit)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query failed actions: %v", err)
+		return nil, fmt.Errorf("failed to query failed actions: %w", err)
 	}
 	defer rows.Close()
 
@@ -339,6 +382,9 @@ func (as *ActionStorage) GetFailedActions(ctx context.Context, limit int) ([]*Ac
 		actions = append(actions, action)
 	}
 
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating actions: %w", err)
+	}
 	return actions, nil
 }
 
@@ -367,11 +413,19 @@ func (as *ActionStorage) GetPendingActions(ctx context.Context) ([]*ActionLog, e
 		}
 		actions = append(actions, action)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating actions: %w", err)
+	}
 
 	return actions, nil
 }
 
 func (as *ActionStorage) DeleteOldActions(ctx context.Context, olderThan time.Duration) (int64, error) {
+	//проверяем наличие соединений с БД
+	if as.pool == nil {
+		slog.Error("database pool is nil")
+		return 0, fmt.Errorf("database pool is nil")
+	}
 	query := `
 		DELETE FROM actions_log
 		WHERE executed_at < $1
@@ -380,7 +434,7 @@ func (as *ActionStorage) DeleteOldActions(ctx context.Context, olderThan time.Du
 	cutoff := time.Now().Add(-olderThan)
 	result, err := as.pool.Exec(ctx, query, cutoff)
 	if err != nil {
-		return 0, fmt.Errorf("failed to delete old actions: %v", err)
+		return 0, fmt.Errorf("failed to delete old actions: %w", err)
 	}
 
 	return result.RowsAffected(), nil

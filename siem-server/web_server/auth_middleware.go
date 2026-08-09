@@ -2,6 +2,8 @@ package webserver
 
 import (
 	"context"
+	"encoding/json"
+	"log/slog"
 	"net/http"
 	"siem-server/users"
 	"strings"
@@ -11,9 +13,9 @@ import (
 type contextKey int
 
 const (
-	ContextUserID   contextKey = iota
-	ContextUsername contextKey = iota
-	ContextUserRole contextKey = iota
+	ContextUserID contextKey = iota
+	ContextUsername
+	ContextUserRole
 )
 
 // AuthMiddleware — проверяет JWT в заголовке Authorization: Bearer <token>
@@ -28,13 +30,13 @@ func AuthMiddleware(jwtSvc *users.JWTService) func(http.Handler) http.Handler {
 
 			authHeader := r.Header.Get("Authorization")
 			if authHeader == "" {
-				respondUnauthorized(w, "токен не предоставлен")
+				respondUnauthorized(w, r, "токен не предоставлен")
 				return
 			}
 
 			parts := strings.SplitN(authHeader, " ", 2)
 			if len(parts) != 2 || strings.ToLower(parts[0]) != "bearer" {
-				respondUnauthorized(w, "неверный формат токена")
+				respondUnauthorized(w, r, "неверный формат токена")
 				return
 			}
 
@@ -42,9 +44,9 @@ func AuthMiddleware(jwtSvc *users.JWTService) func(http.Handler) http.Handler {
 			if err != nil {
 				switch err {
 				case users.ErrTokenExpired:
-					respondUnauthorized(w, "токен истёк")
+					respondUnauthorized(w, r, "токен истёк")
 				default:
-					respondUnauthorized(w, "недействительный токен")
+					respondUnauthorized(w, r, "недействительный токен")
 				}
 				return
 			}
@@ -65,7 +67,7 @@ func RequireRole(roles ...users.Role) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			role, ok := r.Context().Value(ContextUserRole).(users.Role)
 			if !ok {
-				respondForbidden(w, "роль не определена")
+				respondForbidden(w, r, "роль не определена")
 				return
 			}
 
@@ -76,7 +78,7 @@ func RequireRole(roles ...users.Role) func(http.Handler) http.Handler {
 				}
 			}
 
-			respondForbidden(w, "недостаточно прав")
+			respondForbidden(w, r, "недостаточно прав")
 		})
 	}
 }
@@ -87,7 +89,7 @@ func RequirePermission(permission string) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			role, ok := r.Context().Value(ContextUserRole).(users.Role)
 			if !ok || !role.HasPermission(permission) {
-				respondForbidden(w, "нет разрешения: "+permission)
+				respondForbidden(w, r, "нет разрешения: "+permission)
 				return
 			}
 			next.ServeHTTP(w, r)
@@ -113,15 +115,27 @@ func getUserRole(ctx context.Context) (users.Role, bool) {
 	return role, ok
 }
 
-func respondUnauthorized(w http.ResponseWriter, msg string) {
+// respondUnauthorized отправляет 401 и логирует причину
+func respondUnauthorized(w http.ResponseWriter, r *http.Request, msg string) {
+	slog.Warn("auth failed",
+		"remote_addr", r.RemoteAddr,
+		"path", r.URL.Path,
+		"reason", msg,
+	)
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("WWW-Authenticate", "Bearer")
 	w.WriteHeader(http.StatusUnauthorized)
-	w.Write([]byte(`{"error":"` + msg + `"}`))
+	json.NewEncoder(w).Encode(map[string]string{"error": msg})
 }
 
-func respondForbidden(w http.ResponseWriter, msg string) {
+// respondForbidden отправляет 403 и логирует причину
+func respondForbidden(w http.ResponseWriter, r *http.Request, msg string) {
+	slog.Warn("forbidden",
+		"remote_addr", r.RemoteAddr,
+		"path", r.URL.Path,
+		"reason", msg,
+	)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusForbidden)
-	w.Write([]byte(`{"error":"` + msg + `"}`))
+	json.NewEncoder(w).Encode(map[string]string{"error": msg})
 }

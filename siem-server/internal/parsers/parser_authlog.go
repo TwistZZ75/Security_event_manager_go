@@ -9,10 +9,15 @@ import (
 	"strings"
 )
 
-type ParseAuthStruct struct{}
+var (
+	reAuthLogMain = regexp.MustCompile(`^(\S+)\s+(\S+)\s+([^\[:]+)(?:\[(\d+)\])?:\s+(.*)$`)
+	reExtractUser = regexp.MustCompile(`'([^']+)'`)
+)
 
-func NewAuthParse() *ParseAuthStruct {
-	return &ParseAuthStruct{}
+type AuthParser struct{}
+
+func NewAuthParse() *AuthParser {
+	return &AuthParser{}
 }
 
 // parseParams разбирает строку параметров вида "key=value key2=value2"
@@ -27,9 +32,9 @@ func parseParams(s string) map[string]string {
 	return params
 }
 
-func (a *ParseAuthStruct) Parser(raw_log *logstructure.RawLog) (*logstructure.NormalizedLog, error) {
+func (a *AuthParser) Parse(raw_log *logstructure.RawLog) (*logstructure.NormalizedLog, error) {
 	entry := &logstructure.NormalizedLog{
-		ID:        a.GenerateID(raw_log),
+		ID:        a.generateID(raw_log),
 		PC_name:   raw_log.PC_name,
 		Username:  raw_log.Username,
 		Timestamp: raw_log.Event_timestamp,
@@ -39,8 +44,7 @@ func (a *ParseAuthStruct) Parser(raw_log *logstructure.RawLog) (*logstructure.No
 	}
 
 	// Формат: timestamp hostname app[pid]: message
-	re := regexp.MustCompile(`^(\S+)\s+(\S+)\s+([^\[:]+)(?:\[(\d+)\])?:\s+(.*)$`)
-	m := re.FindStringSubmatch(raw_log.Raw_data)
+	m := reAuthLogMain.FindStringSubmatch(raw_log.Raw_data)
 	if len(m) < 6 {
 		entry.Event_category = "Authentication"
 		entry.Event_description = raw_log.Raw_data
@@ -95,7 +99,7 @@ func (a *ParseAuthStruct) Parser(raw_log *logstructure.RawLog) (*logstructure.No
 //	"Account Created" → "Account created: <name>"
 //
 // =============================================================================
-func (a *ParseAuthStruct) categorize(app, msg string, params map[string]string, username, host string) (category, severity, description string) {
+func (a *AuthParser) categorize(app, msg string, params map[string]string, username, host string) (category, severity, description string) {
 	appL := strings.ToLower(app)
 	msgL := strings.ToLower(msg)
 
@@ -352,7 +356,7 @@ func (a *ParseAuthStruct) categorize(app, msg string, params map[string]string, 
 	return "Authentication", "Info", msg
 }
 
-func (a *ParseAuthStruct) GenerateID(raw_log *logstructure.RawLog) string {
+func (a *AuthParser) generateID(raw_log *logstructure.RawLog) string {
 	data := raw_log.Log_source + raw_log.PC_name + raw_log.Username + raw_log.Raw_data
 	h := sha256.Sum256([]byte(data))
 	return hex.EncodeToString(h[:])
@@ -369,8 +373,7 @@ func extractNewUser(msg string) string {
 		return rest
 	}
 	// userdel: "delete user 'bob'"
-	re := regexp.MustCompile(`'([^']+)'`)
-	if m := re.FindStringSubmatch(msg); len(m) > 1 {
+	if m := reExtractUser.FindStringSubmatch(msg); len(m) > 1 {
 		return m[1]
 	}
 	return ""

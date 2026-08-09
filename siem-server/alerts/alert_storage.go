@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -14,15 +15,26 @@ type AlertStorage struct {
 	pool *pgxpool.Pool
 }
 
+type TopTriggeredRule struct {
+	RuleID   string
+	RuleName string
+	Count    int64
+}
+
 func NewAlertStorage(pool *pgxpool.Pool) *AlertStorage {
 	return &AlertStorage{pool: pool}
 }
 
 func (ast *AlertStorage) CreateAlert(ctx context.Context, alert *Alert) error {
+	//проверяем наличие соединений с БД
+	if ast.pool == nil {
+		slog.Error("database pool is nil")
+		return fmt.Errorf("database pool is nil")
+	}
 	// Сериализуем event_data в JSONB
 	eventDataJSON, err := json.Marshal(alert.EventData)
 	if err != nil {
-		return fmt.Errorf("failed to marshal event data: %v", err)
+		return fmt.Errorf("failed to marshal event data: %w", err)
 	}
 
 	query := `
@@ -51,13 +63,18 @@ func (ast *AlertStorage) CreateAlert(ctx context.Context, alert *Alert) error {
 	).Scan(&alert.ID)
 
 	if err != nil {
-		return fmt.Errorf("failed to create alert: %v", err)
+		return fmt.Errorf("failed to create alert: %w", err)
 	}
 
 	return nil
 }
 
 func (ast *AlertStorage) GetAlert(ctx context.Context, id string) (*Alert, error) {
+	//проверяем наличие соединений с БД
+	if ast.pool == nil {
+		slog.Error("database pool is nil")
+		return nil, fmt.Errorf("database pool is nil")
+	}
 	query := `
 		SELECT 
 			id,
@@ -82,9 +99,9 @@ func (ast *AlertStorage) GetAlert(ctx context.Context, id string) (*Alert, error
 	alert, err := ast.ScanAlert(row)
 	if err != nil {
 		if err == pgx.ErrNoRows {
-			return nil, fmt.Errorf("alert not found: %v", id)
+			return nil, fmt.Errorf("alert %v not found: %w", id, pgx.ErrNoRows)
 		}
-		return nil, fmt.Errorf("failed to get alert: %v", err)
+		return nil, fmt.Errorf("failed to get alert: %w", err)
 	}
 
 	return alert, nil
@@ -128,14 +145,14 @@ func (ast *AlertStorage) ScanAlert(scanner interface {
 	)
 
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("Scan alert error %w", err)
 	}
 
 	// Десериализуем event_data
 	var eventData map[string]interface{}
 	if len(eventDataJSON) > 0 {
 		if err := json.Unmarshal(eventDataJSON, &eventData); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal event data: %v", err)
+			return nil, fmt.Errorf("failed to unmarshal event data: %w", err)
 		}
 	}
 
@@ -160,6 +177,11 @@ func (ast *AlertStorage) ScanAlert(scanner interface {
 }
 
 func (ast *AlertStorage) GetAlerts(ctx context.Context, filter AlertFilter) ([]*Alert, error) {
+	//проверяем наличие соединений с БД
+	if ast.pool == nil {
+		slog.Error("database pool is nil")
+		return nil, fmt.Errorf("database pool is nil")
+	}
 	// Строим динамический запрос
 	query := `
 		SELECT 
@@ -226,7 +248,7 @@ func (ast *AlertStorage) GetAlerts(ctx context.Context, filter AlertFilter) ([]*
 	// Выполняем запрос
 	rows, err := ast.pool.Query(ctx, query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query alerts: %v", err)
+		return nil, fmt.Errorf("failed to query alerts: %w", err)
 	}
 	defer rows.Close()
 
@@ -235,20 +257,25 @@ func (ast *AlertStorage) GetAlerts(ctx context.Context, filter AlertFilter) ([]*
 	for rows.Next() {
 		alert, err := ast.ScanAlert(rows)
 		if err != nil {
-			fmt.Printf("Warning: failed to scan alert: %v\n", err)
+			slog.Warn("failed to scan alert", "error", err)
 			continue
 		}
 		alertsList = append(alertsList, alert)
 	}
 
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating alerts: %v", err)
+		return nil, fmt.Errorf("error iterating alerts: %w", err)
 	}
 
 	return alertsList, nil
 }
 
 func (ast *AlertStorage) UpdateAlert(ctx context.Context, id int64, status string, updatedBy string, notes string) error {
+	//проверяем наличие соединений с БД
+	if ast.pool == nil {
+		slog.Error("database pool is nil")
+		return fmt.Errorf("database pool is nil")
+	}
 	now := time.Now()
 
 	var query string
@@ -300,22 +327,27 @@ func (ast *AlertStorage) UpdateAlert(ctx context.Context, id int64, status strin
 		args = []interface{}{status, now, updatedBy, notes, id}
 
 	default:
-		return fmt.Errorf("invalid alert status: %s", status)
+		return fmt.Errorf("invalid alert status: %v", status)
 	}
 
 	result, err := ast.pool.Exec(ctx, query, args...)
 	if err != nil {
-		return fmt.Errorf("failed to update alert status: %v", err)
+		return fmt.Errorf("failed to update alert status: %w", err)
 	}
 
 	if result.RowsAffected() == 0 {
-		return fmt.Errorf("alert not found: %d", id)
+		return fmt.Errorf("alert not found: %v", id)
 	}
 
 	return nil
 }
 
 func (ast *AlertStorage) GetAlertStats(ctx context.Context, from, to time.Time) (*AlertStats, error) {
+	//проверяем наличие соединений с БД
+	if ast.pool == nil {
+		slog.Error("database pool is nil")
+		return nil, fmt.Errorf("database pool is nil")
+	}
 	query := `
 		SELECT
 			COUNT(*)::BIGINT as total,
@@ -359,7 +391,7 @@ func (ast *AlertStorage) GetAlertStats(ctx context.Context, from, to time.Time) 
 	)
 
 	if err != nil {
-		return nil, fmt.Errorf("failed to get alert stats: %v", err)
+		return nil, fmt.Errorf("failed to get alert stats: %w", err)
 	}
 
 	stats := &AlertStats{
@@ -423,6 +455,11 @@ func (ast *AlertStorage) GetRecentAlerts(ctx context.Context, limit int) ([]*Ale
 
 // CountAlerts возвращает общее количество алертов с учетом фильтра
 func (ast *AlertStorage) CountAlerts(ctx context.Context, filter AlertFilter) (int64, error) {
+	//проверяем наличие соединений с БД
+	if ast.pool == nil {
+		slog.Error("database pool is nil")
+		return 0, fmt.Errorf("database pool is nil")
+	}
 	query := `SELECT COUNT(*) FROM alerts WHERE 1=1`
 
 	args := []interface{}{}
@@ -455,12 +492,13 @@ func (ast *AlertStorage) CountAlerts(ctx context.Context, filter AlertFilter) (i
 	if !filter.To.IsZero() {
 		query += fmt.Sprintf(" AND created_at <= $%d", argPos)
 		args = append(args, filter.To)
+		argPos++
 	}
 
 	var count int64
 	err := ast.pool.QueryRow(ctx, query, args...).Scan(&count)
 	if err != nil {
-		return 0, fmt.Errorf("failed to count alerts: %v", err)
+		return 0, fmt.Errorf("failed to count alerts: %w", err)
 	}
 
 	return count, nil
@@ -468,6 +506,11 @@ func (ast *AlertStorage) CountAlerts(ctx context.Context, filter AlertFilter) (i
 
 // DeleteOldAlerts удаляет алерты старше указанного периода
 func (ast *AlertStorage) DeleteOldAlerts(ctx context.Context, olderThan time.Duration) (int64, error) {
+	//проверяем наличие соединений с БД
+	if ast.pool == nil {
+		slog.Error("database pool is nil")
+		return 0, fmt.Errorf("database pool is nil")
+	}
 	query := `
 		DELETE FROM alerts
 		WHERE created_at < $1
@@ -477,7 +520,7 @@ func (ast *AlertStorage) DeleteOldAlerts(ctx context.Context, olderThan time.Dur
 	cutoff := time.Now().Add(-olderThan)
 	result, err := ast.pool.Exec(ctx, query, cutoff)
 	if err != nil {
-		return 0, fmt.Errorf("failed to delete old alerts: %v", err)
+		return 0, fmt.Errorf("failed to delete old alerts: %w", err)
 	}
 
 	return result.RowsAffected(), nil
@@ -485,6 +528,11 @@ func (ast *AlertStorage) DeleteOldAlerts(ctx context.Context, olderThan time.Dur
 
 // GetAlertTimeline возвращает временную линию алертов (по часам)
 func (ast *AlertStorage) GetAlertTimeline(ctx context.Context, from, to time.Time) (map[string]int64, error) {
+	//проверяем наличие соединений с БД
+	if ast.pool == nil {
+		slog.Error("database pool is nil")
+		return nil, fmt.Errorf("database pool is nil")
+	}
 	query := `
 		SELECT 
 			date_trunc('hour', created_at) as hour,
@@ -497,7 +545,7 @@ func (ast *AlertStorage) GetAlertTimeline(ctx context.Context, from, to time.Tim
 
 	rows, err := ast.pool.Query(ctx, query, from, to)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get alert timeline: %v", err)
+		return nil, fmt.Errorf("failed to get alert timeline: %w", err)
 	}
 	defer rows.Close()
 
@@ -508,21 +556,25 @@ func (ast *AlertStorage) GetAlertTimeline(ctx context.Context, from, to time.Tim
 		var count int64
 
 		if err := rows.Scan(&hour, &count); err != nil {
-			return nil, fmt.Errorf("failed to scan timeline row: %v", err)
+			return nil, fmt.Errorf("failed to scan timeline row: %w", err)
 		}
 
 		timeline[hour.Format(time.RFC3339)] = count
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating rows: %w", err)
 	}
 
 	return timeline, nil
 }
 
 // GetTopTriggeredRules возвращает топ N правил по количеству алертов
-func (ast *AlertStorage) GetTopTriggeredRules(ctx context.Context, limit int, from, to time.Time) ([]struct {
-	RuleID   string
-	RuleName string
-	Count    int64
-}, error) {
+func (ast *AlertStorage) GetTopTriggeredRules(ctx context.Context, limit int, from, to time.Time) ([]TopTriggeredRule, error) {
+	//проверяем наличие соединений с БД
+	if ast.pool == nil {
+		slog.Error("database pool is nil")
+		return nil, fmt.Errorf("database pool is nil")
+	}
 	query := `
 		SELECT 
 			rule_id,
@@ -537,28 +589,23 @@ func (ast *AlertStorage) GetTopTriggeredRules(ctx context.Context, limit int, fr
 
 	rows, err := ast.pool.Query(ctx, query, from, to, limit)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get top rules: %v", err)
+		return nil, fmt.Errorf("failed to get top rules: %w", err)
 	}
 	defer rows.Close()
 
-	var results []struct {
-		RuleID   string
-		RuleName string
-		Count    int64
-	}
+	var results []TopTriggeredRule
 
 	for rows.Next() {
-		var result struct {
-			RuleID   string
-			RuleName string
-			Count    int64
-		}
-
+		var result TopTriggeredRule
 		if err := rows.Scan(&result.RuleID, &result.RuleName, &result.Count); err != nil {
-			return nil, fmt.Errorf("failed to scan row: %v", err)
+			return nil, fmt.Errorf("failed to scan row: %w", err)
 		}
 
 		results = append(results, result)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating rows: %w", err)
 	}
 
 	return results, nil

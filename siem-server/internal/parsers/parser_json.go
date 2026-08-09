@@ -4,6 +4,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
+	"log/slog"
 	"siem-server/internal/logsstructure"
 	logstructure "siem-server/internal/logsstructure"
 )
@@ -26,55 +28,38 @@ func NewSuricataParse() *ParseSuricataStruct {
 	return &ParseSuricataStruct{}
 }
 
-func (sur *ParseSuricataStruct) Parser(raw_log *logsstructure.RawLog) (*logsstructure.NormalizedLog, error) {
+func (sur *ParseSuricataStruct) Parse(raw_log *logsstructure.RawLog) (*logsstructure.NormalizedLog, error) {
+	var event SuricataEvent
+	err := json.Unmarshal([]byte(raw_log.Raw_data), &event)
+	if err != nil {
+		slog.Error("Cannot unmarshal json", "error", err)
+		return nil, fmt.Errorf("Cannot unmarshal json %w", err)
+	}
 	NormalizedLog := &logstructure.NormalizedLog{
-		ID:                sur.GenerateID(raw_log),
+		ID:                sur.generateID(raw_log),
 		PC_name:           raw_log.PC_name,
 		Username:          raw_log.Username,
-		Event_description: sur.Define_EventDescription(raw_log.Raw_data),
-		Event_category:    sur.Define_EventCategory(raw_log.Raw_data),
+		Event_description: event.Alert.Signature,
+		Event_category:    event.EventType,
 		Process_name:      "Network",
-		Severity:          sur.Define_Severity(raw_log.Raw_data),
+		Severity:          sur.defineSeverity(event.Alert.Severity),
 		Timestamp:         raw_log.Event_timestamp,
 		OS:                raw_log.OS,
 		Source:            raw_log.Log_source,
 		Raw_log:           raw_log.Raw_data,
+		RawLogCached:      eventToMap(event),
 	}
 	//fmt.Println(NormalizedLog)
 	return NormalizedLog, nil
 }
 
-	func (sur *ParseSuricataStruct) GenerateID(raw_log *logstructure.RawLog) string {
-		data := raw_log.Log_source + raw_log.PC_name + raw_log.Username + raw_log.Raw_data
-		hashID := sha256.Sum256([]byte(data))
-		return hex.EncodeToString((hashID[:]))
-	}
-
-func (sur *ParseSuricataStruct) Define_EventDescription(raw_log string) string {
-	var event SuricataEvent
-	err := json.Unmarshal([]byte(raw_log), &event)
-	if err != nil {
-		return err.Error()
-	}
-	return event.Alert.Signature
+func (sur *ParseSuricataStruct) generateID(raw_log *logstructure.RawLog) string {
+	data := raw_log.Log_source + raw_log.PC_name + raw_log.Username + raw_log.Raw_data
+	hashID := sha256.Sum256([]byte(data))
+	return hex.EncodeToString((hashID[:]))
 }
 
-func (sur *ParseSuricataStruct) Define_EventCategory(raw_log string) string {
-	var event SuricataEvent
-	err := json.Unmarshal([]byte(raw_log), &event)
-	if err != nil {
-		return err.Error()
-	}
-	return event.Alert.Category
-}
-
-func (sur *ParseSuricataStruct) Define_Severity(raw_log string) string {
-	var event SuricataEvent
-	err := json.Unmarshal([]byte(raw_log), &event)
-	if err != nil {
-		return err.Error()
-	}
-	level := event.Alert.Severity
+func (sur *ParseSuricataStruct) defineSeverity(level int) string {
 	switch level {
 	case 1:
 		return "Low"
@@ -86,5 +71,20 @@ func (sur *ParseSuricataStruct) Define_Severity(raw_log string) string {
 		return "Critical"
 	default:
 		return "Info"
+	}
+}
+
+// eventToMap конвертирует SuricataEvent в map для быстрого доступа по полям
+func eventToMap(e SuricataEvent) map[string]interface{} {
+	return map[string]interface{}{
+		"timestamp":  e.Timestamp,
+		"event_type": e.EventType,
+		"src_ip":     e.SrcIP,
+		"dest_ip":    e.DstIP,
+		"alert": map[string]interface{}{
+			"signature": e.Alert.Signature,
+			"category":  e.Alert.Category,
+			"severity":  e.Alert.Severity,
+		},
 	}
 }

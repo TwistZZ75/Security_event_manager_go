@@ -3,7 +3,9 @@ package actions
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"siem-server/agent"
+	"siem-server/rules"
 )
 
 // GRPCAgentComm реализует AgentCommunicator через CommandQueue
@@ -20,6 +22,9 @@ func NewGRPCAgentComm(commandQueue *agent.CommandQueue) *GRPCAgentComm {
 
 // SendCommand отправляет команду агенту через очередь команд
 func (gac *GRPCAgentComm) SendCommand(ctx context.Context, host string, command AgentCommand) error {
+	if gac.commandQueue == nil {
+		return fmt.Errorf("command queue is not initialized")
+	}
 	// Преобразуем AgentCommand в agent.AgentCommand
 	agentCmd := &agent.AgentCommand{
 		Hostname:    host,
@@ -32,8 +37,10 @@ func (gac *GRPCAgentComm) SendCommand(ctx context.Context, host string, command 
 
 	// Добавляем команду в очередь
 	if err := gac.commandQueue.CreateCommand(ctx, agentCmd); err != nil {
-		return fmt.Errorf("failed to create command: %v", err)
+		return fmt.Errorf("failed to create command: %w", err)
 	}
+
+	slog.Debug("command was succesfuly send to host")
 
 	return nil
 }
@@ -50,9 +57,9 @@ func convertParameters(params map[string]interface{}) map[string]string {
 // determinePriority определяет приоритет команды на основе типа
 func determinePriority(commandType string) string {
 	switch commandType {
-	case "block_account", "block_network", "isolate_host":
+	case rules.ActionBlockAccount, rules.ActionBlockNetwork, rules.ActionIsolateHost:
 		return "high"
-	case "kill_process", "quarantine_file":
+	case rules.ActionKillProcess, rules.ActionQuarantineFile:
 		return "medium"
 	default:
 		return "low"

@@ -3,7 +3,7 @@ package webserver
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"siem-server/actions"
 	"siem-server/agent"
@@ -16,13 +16,15 @@ import (
 	"github.com/gorilla/mux"
 )
 
+//TODO: написать middleware для обработки паник в хендлерах
+
 type WebServer struct {
 	router        *mux.Router
 	agentStorage  *agent.AgentStorage
 	alertStorage  *alerts.AlertStorage
 	actionStorage *actions.ActionStorage
 	ruleStorage   *rules.RuleStorage
-	LogStorage    *postgres.LogStorage
+	logStorage    *postgres.LogStorage
 	userStorage   *users.UserStorage
 	jwtService    *users.JWTService
 	userHandler   *users.Handler
@@ -47,7 +49,7 @@ func NewWebServer(
 		alertStorage:  alertStorage,
 		actionStorage: actionStorage,
 		ruleStorage:   ruleStorage,
-		LogStorage:    logStorage,
+		logStorage:    logStorage,
 		userStorage:   userStorage,
 		jwtService:    jwtService,
 		userHandler:   userHandler,
@@ -62,7 +64,7 @@ func (ws *WebServer) Start(addr string) error {
 		Addr:    addr,
 		Handler: ws.router,
 	}
-	log.Printf("Web server starting on %s", addr)
+	slog.Info("Web server starting on", "address", addr)
 	if err := ws.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		return fmt.Errorf("web server error: %w", err)
 	}
@@ -70,8 +72,11 @@ func (ws *WebServer) Start(addr string) error {
 }
 
 func (ws *WebServer) Shutdown(ctx context.Context) error {
+	if ws.server == nil {
+		return nil
+	}
 	if err := ws.server.Shutdown(ctx); err != nil {
-		return fmt.Errorf("Shuting down error %w", err)
+		return fmt.Errorf("server shutdown error: %w", err)
 	}
 	return nil
 }

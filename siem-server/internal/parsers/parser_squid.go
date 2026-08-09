@@ -13,9 +13,9 @@ func NewSquidParse() *ParseSquidStruct {
 	return &ParseSquidStruct{}
 }
 
-func (squid_p *ParseSquidStruct) Parser(raw_log *logstructure.RawLog) (*logstructure.NormalizedLog, error) {
+func (squid_p *ParseSquidStruct) Parse(raw_log *logstructure.RawLog) (*logstructure.NormalizedLog, error) {
 	NormalizedLog := &logstructure.NormalizedLog{
-		ID:        squid_p.GenerateID(raw_log),
+		ID:        squid_p.generateID(raw_log),
 		PC_name:   raw_log.PC_name,
 		Username:  raw_log.Username,
 		Timestamp: raw_log.Event_timestamp,
@@ -60,7 +60,7 @@ func (squid_p *ParseSquidStruct) Parser(raw_log *logstructure.RawLog) (*logstruc
 // функция генерации ID по содержанию лога для дедупликации логов (чтобы 1 и тот же лог дважды не записывался)
 // принимает сырой лог
 // возвращает хеш строку на основе данных из сырого лога
-func (squid_p *ParseSquidStruct) GenerateID(raw_log *logstructure.RawLog) string {
+func (squid_p *ParseSquidStruct) generateID(raw_log *logstructure.RawLog) string {
 	data := raw_log.Log_source + raw_log.PC_name + raw_log.Username + raw_log.Raw_data
 	hashID := sha256.Sum256([]byte(data))
 	return hex.EncodeToString((hashID[:]))
