@@ -1,5 +1,5 @@
 /.vscode
-/siem-server/.env
+/.env
 /siem-server/proto/logs.proto
 /что нужно будет сделать.md
 /agent_linux/agent/proto/logs.proto

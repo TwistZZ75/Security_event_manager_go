@@ -2,24 +2,36 @@ services:
 
   # ── PostgreSQL ──────────────────────────────────────────────────────────────
   postgres:
-    image: postgres:16-alpine
+    image: postgres:alpine
     container_name: siem_postgres
     restart: unless-stopped
     environment:
-      POSTGRES_USER:     siem_user
-      POSTGRES_PASSWORD: siem_password
-      POSTGRES_DB:       siem_db
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
     volumes:
       - ./migrations/migration.sql:/docker-entrypoint-initdb.d/init.sql:ro
-
-      - postgres_data:/var/lib/postgresql/data
+      - ./migrations/testdata.sql:/docker-entrypoint-initdb.d/02-testdata.sql:ro
+      - postgres_data:/var/lib/postgresql
     ports:
-      # Открываем наружу только для отладки
-      - "5432:5432"
+      - "5433:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U siem_user -d siem_db"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:alpine
+    container_name: siem_redis
+    command: redis-server --requirepass ${REDIS_PASSWORD}
+    restart: unless-stopped
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 5s
+      timeout: 3s
       retries: 10
   siem-server:
     build:
@@ -27,9 +39,11 @@ services:
       dockerfile: Dockerfile
     container_name: siem_server
     restart: unless-stopped
-    env_file: ./siem-server/.env
+    env_file: .env
     depends_on:
       postgres:
+        condition: service_healthy  
+      redis:
         condition: service_healthy
     ports:
       - "8080:8080"   # HTTP REST API
