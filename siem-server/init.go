@@ -8,6 +8,7 @@ import (
 	"siem-server/actions"
 	"siem-server/agent"
 	"siem-server/alerts"
+	"siem-server/cache"
 	"siem-server/internal/delivery"
 	wsevents "siem-server/internal/events"
 	"siem-server/internal/parsers"
@@ -16,6 +17,7 @@ import (
 	"siem-server/rules"
 	"siem-server/state"
 	"siem-server/users"
+	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -39,6 +41,29 @@ func InitDb(ctx context.Context) (*pgxpool.Pool, error) {
 	}
 	log.Println("Connected to PostgreSQL")
 	return pool, nil
+}
+
+func InitRedis(ctx context.Context) (*cache.Redis, error) {
+	redisHost := os.Getenv("REDIS_HOST")
+	redisPort, err := strconv.Atoi(os.Getenv("REDIS_PORT"))
+	if err != nil {
+		return nil, fmt.Errorf("invalid REDIS_PORT: %w", err)
+	}
+
+	redisPassword := os.Getenv("REDIS_PASSWORD")
+
+	redisClient := cache.NewRedis(redisHost, redisPort, redisPassword)
+
+	ctxRedis, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	if err := redisClient.Ping(ctxRedis); err != nil {
+		return nil, fmt.Errorf("failed to connect to Redis: %w", err)
+	}
+
+	log.Println("Connected to Redis")
+
+	return redisClient, nil
 }
 
 type Storages struct {
@@ -82,12 +107,13 @@ type Services struct {
 	LogHandler    *delivery.LogHandler
 	AgentHandler  *agent.AgentServiceHandler
 	EventBus      *wsevents.Bus
+	Redis         *cache.Redis
 }
 
 // функция инициализации сервисов и хендлеров
 // принимает объект хранилища
 // возвращает объект сервиса
-func InitServices(storages *Storages) *Services {
+func InitServices(storages *Storages, redisClient *cache.Redis) *Services {
 	eventBus := wsevents.NewBus()
 	jwtService := users.NewJWTService()
 	userHandler := users.NewHandler(storages.UserStorage, jwtService)
@@ -97,6 +123,7 @@ func InitServices(storages *Storages) *Services {
 	actionDsp := actions.NewDispatcher(storages.ActionStorage, agentCommunicator, notifier)
 	ruleEngine := rules.NewEngine(
 		storages.RuleStorage,
+		redisClient,
 		alertMgr,
 		actionDsp,
 		storages.StateStorage,
@@ -119,5 +146,6 @@ func InitServices(storages *Storages) *Services {
 		LogHandler:    logHandler,
 		AgentHandler:  agentHandler,
 		EventBus:      eventBus,
+		Redis:         redisClient,
 	}
 }

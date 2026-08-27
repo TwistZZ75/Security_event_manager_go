@@ -1,6 +1,7 @@
 package rules
 
 import (
+	"regexp"
 	"time"
 )
 
@@ -25,52 +26,53 @@ type Rule struct {
 
 // представляет условие срабатывания правила
 type Condition struct {
-	Field    string      `json:"field"`
-	Operator string      `json:"operator"`
-	Value    interface{} `json:"value"`
+	Field         string         `json:"field"`
+	Operator      string         `json:"operator"`
+	Value         interface{}    `json:"value"`
+	CompiledRegex *regexp.Regexp `json:"-"`
 }
 
 // представляет агрегацию нескольких событий
 type Aggregation struct {
 	// Тип агрегации: count | threshold | sequence
 	Type string `json:"type"`
- 
+
 	// ── Общие поля ──────────────────────────────────────────────────────────
- 
+
 	// Field — поле события для группировки (например "pc_name" или "username").
 	// Если пустое — один глобальный счётчик для всего правила.
 	Field string `json:"field,omitempty"`
- 
+
 	// TimeWindow — ширина временного окна: "30s", "5m", "1h", "24h".
 	TimeWindow string `json:"time_window"`
- 
+
 	// ── Поля для type=count ──────────────────────────────────────────────────
- 
+
 	// Threshold — количество событий, при достижении которого правило срабатывает.
 	// Используется в type=count.
 	Threshold int `json:"threshold"`
- 
+
 	// ── Поля для type=threshold ──────────────────────────────────────────────
- 
+
 	// ValueField — поле события, из которого извлекается числовое значение.
 	// Поддерживается dot-нотация для JSON в raw_log: "raw_log.bytes_toserver".
 	// Для type=threshold и operator=distinct_count — поле для подсчёта уникальных значений.
 	ValueField string `json:"value_field,omitempty"`
- 
+
 	// Operator — операция агрегации числовых значений:
 	//   sum           — сумма значений
 	//   max           — максимальное значение
 	//   avg           — среднее значение
 	//   distinct_count — количество уникальных значений поля ValueField
 	Operator string `json:"operator,omitempty"`
- 
+
 	// ThresholdValue — пороговое значение для type=threshold.
 	// Используется float64 для поддержки дробных порогов (байты, секунды и т.п.).
 	// Если не задан — используется Threshold (int) как fallback.
 	ThresholdValue float64 `json:"threshold_value,omitempty"`
- 
+
 	// ── Поля для type=sequence ───────────────────────────────────────────────
- 
+
 	// Steps — шаги последовательности начиная со второго.
 	// Первый шаг — это условия верхнего уровня правила (Rule.Conditions).
 	// Steps[0] — условия второго шага, Steps[1] — третьего и т.д.
@@ -113,7 +115,7 @@ const (
 )
 
 // Операторы threshold-агрегации
- 
+
 const (
 	ThresholdOpSum           = "sum"
 	ThresholdOpMax           = "max"

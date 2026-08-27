@@ -21,9 +21,9 @@ func main() {
 
 	log.Println("Starting SIEM server...")
 
-	// Загружаем переменные окружения
+	// Загружаем переменные окружения для локальной работы
 	if err := godotenv.Load(); err != nil {
-		log.Fatalf("No .env file found")
+		log.Println("No .env file found, using environment variables")
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM) //создаём корневой контекст с отменой
 	defer cancel()                                                                             //всегда отменяем при завершении main
@@ -35,21 +35,26 @@ func main() {
 	}
 	defer pool.Close()
 
-	storages := InitStorages(pool)     //инициализация всех хранилищ
-	services := InitServices(storages) //инициализация всех сервисов
+	redisClient, err := InitRedis(ctx)
+	if err != nil {
+		log.Fatalf("Redis initialization failed: %v", err)
+	}
+	defer redisClient.Close()
+
+	storages := InitStorages(pool)                  //инициализация всех хранилищ
+	services := InitServices(storages, redisClient) //инициализация всех сервисов
 	webServer := webserver.NewWebServer(
 		storages.AgentStorage, storages.AlertStorage, storages.ActionStorage, storages.RuleStorage, storages.LogStorage,
-		storages.UserStorage, services.JwtService, services.UserHandler, services.EventBus,
+		storages.UserStorage, services.JwtService, services.UserHandler, services.EventBus, services.RuleEngine,
 	)
 	http_port := os.Getenv("HTTP_PORT")
 	//запуск всех фоновых процессов
-	wg.Add(6)
+	wg.Add(5)
 	go StartRuleEngine(ctx, cancel, services, storages, &wg)
 	go StartWebServer(ctx, cancel, webServer, http_port, &wg)
 	log.Println("Web interface available at http://localhost:8080")
 	go DeleteExpiredTokens(ctx, pool, &wg)
 	go DeleteExpiredStates(ctx, storages, &wg)
-	go ReloadRules(ctx, storages, services, &wg)
 	go CheckAgentStatus(ctx, storages, services, &wg)
 	log.Println("Background tasks started")
 

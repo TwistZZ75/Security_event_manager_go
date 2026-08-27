@@ -82,39 +82,6 @@ func DeleteExpiredStates(ctx context.Context, storages *Storages, wg *sync.WaitG
 	}
 }
 
-// функция перезагрузки правил
-// загружает все правила каждые 5 минут
-// принимает контекст, объект хранилища, объект сервиса и waitGroup
-func ReloadRules(ctx context.Context, storages *Storages, services *Services, wg *sync.WaitGroup) {
-	defer wg.Done()
-	ticker := time.NewTicker(5 * time.Minute)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			ctxReload, cancel := context.WithTimeout(ctx, 2*time.Second)
-			errReload := services.RuleEngine.ReloadRules(ctxReload)
-			cancel()
-			if errReload != nil {
-				slog.Error("Failed to reload rules", "error", errReload)
-				return
-			} else {
-				ctxCount, cancel := context.WithTimeout(ctx, 2*time.Second)
-				ruleCount, errCount := storages.RuleStorage.GetEnabledRulesCount(ctxCount)
-				cancel()
-				if errCount != nil {
-					slog.Error("Cannot count enabled rules", "error", errCount)
-				}
-				slog.Info("Rules reloaded", "Enabled rule count: ", ruleCount)
-			}
-
-		}
-	}
-
-}
-
 // функция проверки статуса "в сети" у агентов
 // каждую минуту проверяет находится ли агент онлайн
 // принимает контекст, объект хранилища, объект сервиса и waitGroup

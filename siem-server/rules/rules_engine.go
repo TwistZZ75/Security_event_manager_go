@@ -10,6 +10,7 @@ import (
 	"net"
 	"regexp"
 	"siem-server/alerts"
+	"siem-server/cache"
 	logstructure "siem-server/internal/logsstructure"
 	"siem-server/state"
 	"strconv"
@@ -18,9 +19,16 @@ import (
 	"time"
 )
 
+// константы для кеширования
+const (
+	rulesCacheKey = "rules:all"
+	rulesCacheTTL = 5 * time.Minute
+)
+
 // Engine представляет движок обработки правил
 type Engine struct {
 	ruleStorage *RuleStorage
+	ruleCache   *cache.Redis
 	alertMgr    *alerts.AlertManager
 	actionDisp  ActionDispatcher
 	stateStore  *state.StateStorage
@@ -37,12 +45,14 @@ type ActionDispatcher interface {
 // NewEngine создает новый движок правил
 func NewEngine(
 	ruleStorage *RuleStorage,
+	ruleCache *cache.Redis,
 	alertMgr *alerts.AlertManager,
 	actionDisp ActionDispatcher,
 	stateStore *state.StateStorage,
 ) *Engine {
 	return &Engine{
 		ruleStorage: ruleStorage,
+		ruleCache:   ruleCache,
 		alertMgr:    alertMgr,
 		actionDisp:  actionDisp,
 		stateStore:  stateStore,
@@ -52,23 +62,64 @@ func NewEngine(
 
 // LoadRules загружает все правила из хранилища
 func (e *Engine) LoadRules(ctx context.Context) error {
-	rules, err := e.ruleStorage.GetAllRules(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to load rules: %v", err)
+	// 1. пытаемся получить правила из кеша, если будет мисс, то пойдём в постгрес
+	if e.ruleCache != nil {
+		if cached, err := e.ruleCache.Get(ctx, rulesCacheKey); err == nil && cached != "" {
+			var rules []*Rule
+			if err := json.Unmarshal([]byte(cached), &rules); err == nil {
+				e.applyRules(rules)
+				slog.Info("Loaded rules from Redis cache", "count", len(rules))
+				return nil
+			}
+			// если не удалось декодировать – идём в БД
+			slog.Warn("failed to decode cached rules, falling back to DB", "error", err)
+		}
 	}
 
+	// 2. идём в базу
+	rules, err := e.ruleStorage.GetAllRules(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to load rules: %w", err)
+	}
+
+	// 3. Сохраняем в кеш (если есть кеш)
+	if e.ruleCache != nil {
+		if data, err := json.Marshal(rules); err == nil {
+			// взяли из базы, положили в кеш то, что взяли, чтобы при повторном обращении уже не ходить в базу
+			if setErr := e.ruleCache.Set(ctx, rulesCacheKey, string(data), rulesCacheTTL); setErr != nil {
+				slog.Warn("failed to store rules in cache", "error", setErr)
+			}
+		}
+	}
+
+	e.applyRules(rules)
+	return nil
+}
+
+// применяет слайс правил к движку
+func (e *Engine) applyRules(rules []*Rule) {
 	e.rulesMutex.Lock()
 	defer e.rulesMutex.Unlock()
 
 	e.rules = make(map[string]*Rule)
 	for _, rule := range rules {
+		if err := compileRuleRegex(rule); err != nil {
+			slog.Warn("skipping rule due to invalid regex", "rule_id", rule.ID, "error", err)
+			continue
+		}
 		if rule.Enabled {
 			e.rules[rule.ID] = rule
 		}
 	}
+	slog.Info("Loaded enabled rules", "count", len(e.rules))
+}
 
-	log.Printf("Loaded %d enabled rules", len(e.rules))
-	return nil
+// инвалидация кеша
+func (e *Engine) InvalidateRulesCache(ctx context.Context) error {
+	if e.ruleCache != nil {
+		_ = e.ruleCache.Del(ctx, rulesCacheKey)
+	}
+	return e.LoadRules(ctx)
 }
 
 // Evaluate оценивает лог против всех активных правил
@@ -579,6 +630,31 @@ func buildStepDurations(times []time.Time) []float64 {
 // Проверка условий
 // ============================================================================
 
+func compileRuleRegex(rule *Rule) error {
+	for i := range rule.Conditions {
+		if err := compileConditionRegex(&rule.Conditions[i]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func compileConditionRegex(cond *Condition) error {
+	if cond.Operator != OpRegex {
+		return nil
+	}
+	strVal, ok := cond.Value.(string)
+	if !ok {
+		return fmt.Errorf("regex operator requires string value, got %T", cond.Value)
+	}
+	re, err := regexp.Compile(strVal)
+	if err != nil {
+		return fmt.Errorf("invalid regex pattern %q: %w", strVal, err)
+	}
+	cond.CompiledRegex = re
+	return nil
+}
+
 func (e *Engine) checkConditions(conditions []Condition, normLog *logstructure.NormalizedLog) bool {
 	for _, cond := range conditions {
 		if !e.checkCondition(cond, normLog) {
@@ -611,15 +687,10 @@ func (e *Engine) checkCondition(cond Condition, normLog *logstructure.Normalized
 	case OpEndsWith:
 		return strings.HasSuffix(fieldLow, strings.ToLower(fmt.Sprintf("%v", cond.Value)))
 	case OpRegex:
-		pattern, ok := cond.Value.(string)
-		if !ok {
+		if cond.CompiledRegex == nil {
 			return false
 		}
-		re, err := regexp.Compile(pattern)
-		if err != nil {
-			return false
-		}
-		return re.MatchString(fieldStr)
+		return cond.CompiledRegex.MatchString(fieldStr)
 	case OpIn:
 		items := toStringSlice(cond.Value)
 		for _, item := range items {

@@ -28,6 +28,7 @@ type WebServer struct {
 	userHandler   *users.Handler
 	server        *http.Server
 	eventBus      *wsevents.Bus
+	ruleEngine    *rules.Engine
 }
 
 func NewWebServer(
@@ -40,6 +41,7 @@ func NewWebServer(
 	jwtService *users.JWTService,
 	userHandler *users.Handler,
 	eventBus *wsevents.Bus,
+	ruleEngine *rules.Engine,
 ) *WebServer {
 	ws := &WebServer{
 		router:        mux.NewRouter(),
@@ -52,6 +54,7 @@ func NewWebServer(
 		jwtService:    jwtService,
 		userHandler:   userHandler,
 		eventBus:      eventBus,
+		ruleEngine:    ruleEngine,
 	}
 	ws.setupRoutes()
 	return ws

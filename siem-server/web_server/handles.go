@@ -245,6 +245,11 @@ func (ws *WebServer) handleCreateRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := ws.ruleEngine.InvalidateRulesCache(ctx); err != nil {
+		slog.Error("failed to reload rules after modification", "error", err)
+		// Не прерываем ответ клиенту, т.к. изменение уже выполнено
+	}
+
 	respondWithJSON(w, http.StatusCreated, rule)
 }
 
@@ -265,6 +270,10 @@ func (ws *WebServer) handleUpdateRule(w http.ResponseWriter, r *http.Request) {
 		respondWithError(w, http.StatusInternalServerError, "Failed to update rule")
 		return
 	}
+	if err := ws.ruleEngine.InvalidateRulesCache(ctx); err != nil {
+		slog.Error("failed to reload rules after modification", "error", err)
+		// Не прерываем ответ клиенту, т.к. изменение уже выполнено
+	}
 
 	respondWithJSON(w, http.StatusOK, rule)
 }
@@ -277,6 +286,11 @@ func (ws *WebServer) handleDeleteRule(w http.ResponseWriter, r *http.Request) {
 	if err := ws.ruleStorage.RemoveRule(ctx, ruleID); err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Failed to delete rule")
 		return
+	}
+
+	if err := ws.ruleEngine.InvalidateRulesCache(ctx); err != nil {
+		slog.Error("failed to reload rules after modification", "error", err)
+		// Не прерываем ответ клиенту, т.к. изменение уже выполнено
 	}
 
 	respondWithJSON(w, http.StatusOK, map[string]string{"message": "Rule deleted successfully"})
@@ -298,6 +312,11 @@ func (ws *WebServer) handleSetRuleEnabled(w http.ResponseWriter, r *http.Request
 	if err := ws.ruleStorage.SetRuleEnabled(ctx, ruleID, body.Enabled); err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Failed to update rule")
 		return
+	}
+
+	if err := ws.ruleEngine.InvalidateRulesCache(ctx); err != nil {
+		slog.Error("failed to reload rules after modification", "error", err)
+		// Не прерываем ответ клиенту, т.к. изменение уже выполнено
 	}
 
 	respondWithJSON(w, http.StatusOK, map[string]interface{}{
